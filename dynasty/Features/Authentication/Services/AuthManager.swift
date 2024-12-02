@@ -269,6 +269,15 @@ class AuthManager: ObservableObject {
         }
     }
     
+    func signInWithApple(credential: AuthCredential) async throws {
+        do {
+            let result = try await auth.signIn(with: credential)
+            await loadUserData(userId: result.user.uid)
+        } catch {
+            throw mapFirebaseError(error)
+        }
+    }
+    
     // MARK: - Helper Methods
     private func mapFirebaseError(_ error: Error) -> AuthError {
         let authError = error as NSError
