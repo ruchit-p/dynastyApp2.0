@@ -1,7 +1,7 @@
 import Foundation
 import FirebaseFirestore
 
-struct User: Codable, Identifiable {
+struct User: Codable, Identifiable, Equatable {
     @DocumentID var id: String?
     var displayName: String
     var email: String
@@ -55,6 +55,26 @@ struct User: Codable, Identifiable {
         self.photoURL = photoURL
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    static func == (lhs: User, rhs: User) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.displayName == rhs.displayName &&
+        lhs.email == rhs.email &&
+        lhs.dateOfBirth == rhs.dateOfBirth &&
+        lhs.firstName == rhs.firstName &&
+        lhs.lastName == rhs.lastName &&
+        lhs.phoneNumber == rhs.phoneNumber &&
+        lhs.familyTreeID == rhs.familyTreeID &&
+        lhs.historyBookID == rhs.historyBookID &&
+        lhs.parentIds == rhs.parentIds &&
+        lhs.childrenIds == rhs.childrenIds &&
+        lhs.isAdmin == rhs.isAdmin &&
+        lhs.canAddMembers == rhs.canAddMembers &&
+        lhs.canEdit == rhs.canEdit &&
+        lhs.photoURL == rhs.photoURL &&
+        lhs.createdAt?.seconds == rhs.createdAt?.seconds &&
+        lhs.updatedAt?.seconds == rhs.updatedAt?.seconds
     }
 }
 

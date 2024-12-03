@@ -55,7 +55,7 @@ struct MainTabView: View {
             }
             .tag(Tab.familyTree)
             
-            VaultView(selectedTab: $selectedTab)
+            VaultView()
                 .tabItem {
                     Image(systemName: "lock.fill")
                     Text("Vault")

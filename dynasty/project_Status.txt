@@ -30,6 +30,15 @@
 - [x] Pull-to-refresh functionality
 - [x] Proper state management
 - [x] File cleanup and temporary storage handling
+- [x] Firebase Storage integration
+- [x] Cloud storage for encrypted files
+- [x] Photos view with grid layout
+- [x] Trash functionality with restore option
+- [x] Thumbnail generation for photos
+- [x] Soft delete support
+- [x] Permanent delete functionality
+- [x] Photo picker integration
+- [x] Multi-photo import support
 
 ### UI/UX
 - [x] Modern SwiftUI interface
@@ -40,11 +49,14 @@
 - [x] Pull-to-refresh functionality
 - [x] Empty state handling
 - [x] Navigation improvements
+- [x] Tab-based navigation
+- [x] Context menus for file operations
+- [x] Photo grid layout
+- [x] Trash view with restore options
 
 ## In Progress
 
 ### Vault
-- [ ] Thumbnail generation for documents
 - [ ] Search functionality
 - [ ] Sort and filter options
 - [ ] Share functionality
@@ -54,19 +66,30 @@
 - [ ] Document metadata editing
 - [ ] Export functionality
 - [ ] Import from other apps
+- [ ] Thumbnail generation for documents
+- [ ] Video preview support
+- [ ] Audio playback support
 
 ### UI/UX
 - [ ] Dark mode support
 - [ ] Accessibility improvements
 - [ ] Localization
 - [ ] Custom animations and transitions
-- [ ] Context menus
 - [ ] Drag and drop support
+- [ ] Photo zoom and pan
+- [ ] Video player controls
+- [ ] Audio player controls
+
+### Feed
+- [ ] Story deletion functionality
+- [ ] Fix comment author name display
+- [ ] Comment editing
+- [ ] Rich text support in stories
+- [ ] Media attachment support
 
 ## Planned Features
 
 ### Vault
-- [ ] Cloud backup integration
 - [ ] Sync across devices
 - [ ] Version history
 - [ ] Conflict resolution
@@ -76,6 +99,9 @@
 - [ ] Document scanning
 - [ ] Password protection for individual items
 - [ ] Secure notes
+- [ ] Automatic photo backup
+- [ ] Photo albums
+- [ ] Smart folders
 
 ### Security
 - [ ] Two-factor authentication
@@ -84,6 +110,8 @@
 - [ ] Secure sharing
 - [ ] Encryption key rotation
 - [ ] Security policy management
+- [ ] Firebase Storage security rules
+- [ ] Cloud backup encryption
 
 ### UI/UX
 - [ ] Customizable themes
@@ -91,6 +119,9 @@
 - [ ] Quick actions
 - [ ] Spotlight integration
 - [ ] Handoff support
+- [ ] Photo editing capabilities
+- [ ] Advanced photo filters
+- [ ] Photo organization tools
 
 ## Known Issues
 1. Memory management during large file operations needs optimization
@@ -98,27 +129,42 @@
 3. Need better error messages for user feedback
 4. Authentication state management needs improvement
 5. Document picker state management needs refinement
+6. Thumbnail caching needs optimization
+7. Network error handling needs improvement
+8. Cloud storage sync needs better progress indicators
+9. Comments don't display current user's name correctly
+10. Story deletion functionality missing
 
 ## Recent Improvements
-1. Fixed SQLite "out of memory" errors with better database configuration
-2. Improved Face ID authentication triggering
-3. Added proper memory management with autoreleasepools
-4. Added transaction support for database operations
-5. Improved security-scoped resource handling
-6. Fixed document download functionality
-7. Improved pull-to-refresh behavior
-8. Added better state management for vault locking
-9. Improved error handling and logging
-10. Added proper cleanup of temporary files
+1. Added Firebase Storage integration for cloud storage
+2. Implemented Photos view with grid layout
+3. Added Trash functionality with restore options
+4. Improved file management with soft delete support
+5. Added thumbnail generation for photos
+6. Implemented tab-based navigation
+7. Added context menus for file operations
+8. Improved database schema with storage path support
+9. Added cloud storage error handling
+10. Implemented permanent delete functionality
+11. Added photo picker with multi-select support
+12. Improved error handling and logging
 
 ## Next Steps
-1. Implement thumbnail generation with proper caching
-2. Add search functionality
+1. Implement search functionality
+2. Add sort and filter options
 3. Improve document preview capabilities
-4. Add sort and filter options
-5. Implement batch operations
-6. Add categories/folders
-7. Improve error handling and user feedback
-8. Add document metadata editing
-9. Implement share functionality
-10. Add export/import capabilities
+4. Implement batch operations
+5. Add categories/folders
+6. Improve error handling and user feedback
+7. Add document metadata editing
+8. Implement share functionality
+9. Add export/import capabilities
+10. Implement video and audio preview support
+11. Add photo editing capabilities
+12. Improve thumbnail caching
+13. Implement Firebase Storage security rules
+14. Add network status monitoring
+15. Implement offline support
+16. Add story deletion functionality
+17. Fix comment author name display
+18. Add comment editing capabilities

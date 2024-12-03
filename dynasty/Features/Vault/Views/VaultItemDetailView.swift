@@ -10,6 +10,8 @@ struct VaultItemDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var error: Error?
     @State private var showError = false
+    @State private var showShareSheet = false
+    @State private var tempFileURL: URL?
     
     private let vaultManager = VaultManager.shared
     private let logger = Logger(subsystem: "com.dynasty.VaultItemDetailView", category: "UI")
@@ -30,6 +32,11 @@ struct VaultItemDetailView: View {
             Section {
                 Button(action: downloadDocument) {
                     Label("Download", systemImage: "arrow.down.circle")
+                }
+                .disabled(isLoading)
+                
+                Button(action: shareDocument) {
+                    Label("Share", systemImage: "square.and.arrow.up")
                 }
                 .disabled(isLoading)
                 
@@ -57,6 +64,16 @@ struct VaultItemDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This action cannot be undone.")
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = tempFileURL {
+                DocumentShareSheet(items: [url])
+                    .onDisappear {
+                        // Clean up temp file after sharing
+                        try? FileManager.default.removeItem(at: url)
+                        tempFileURL = nil
+                    }
+            }
         }
         .overlay {
             if isLoading {
@@ -107,6 +124,34 @@ struct VaultItemDetailView: View {
         }
     }
     
+    private func shareDocument() {
+        guard let userId = authManager.user?.id else { return }
+        
+        isLoading = true
+        Task {
+            do {
+                logger.info("Preparing document for sharing: \(document.id)")
+                let data = try await vaultManager.downloadFile(document, userId: userId)
+                
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(document.title)
+                try data.write(to: tempURL, options: .atomic)
+                
+                await MainActor.run {
+                    tempFileURL = tempURL
+                    showShareSheet = true
+                }
+                
+                logger.info("Document ready for sharing: \(document.id)")
+            } catch {
+                logger.error("Failed to prepare document for sharing: \(error.localizedDescription)")
+                self.error = error
+                self.showError = true
+            }
+            isLoading = false
+        }
+    }
+    
     private func deleteDocument() {
         isLoading = true
         Task {
@@ -132,4 +177,19 @@ struct VaultItemDetailView: View {
         formatter.countStyle = .file
         return formatter.string(fromByteCount: size)
     }
+}
+
+// Renamed to avoid conflict
+struct DocumentShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: items,
+            applicationActivities: nil
+        )
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

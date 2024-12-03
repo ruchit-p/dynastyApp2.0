@@ -38,7 +38,7 @@ struct VaultItemMetadata: Codable {
     let fileSize: Int64
     let mimeType: String
     let encryptionKeyId: String
-    let iv: Data
+    var iv: Data
     let hash: String
 }
 
@@ -48,9 +48,28 @@ struct VaultItem: Identifiable, Codable {
     let title: String
     let description: String?
     let fileType: VaultItemType
-    let encryptedFileURL: String
+    let encryptedFileName: String
+    let storagePath: String
     let thumbnailURL: String?
     let metadata: VaultItemMetadata
     let createdAt: Date
     let updatedAt: Date
+    var isDeleted: Bool
+    
+    init(id: String, userId: String, title: String, description: String?, fileType: VaultItemType, 
+         encryptedFileName: String, storagePath: String, thumbnailURL: String?, metadata: VaultItemMetadata, 
+         createdAt: Date, updatedAt: Date, isDeleted: Bool = false) {
+        self.id = id
+        self.userId = userId
+        self.title = title
+        self.description = description
+        self.fileType = fileType
+        self.encryptedFileName = encryptedFileName
+        self.storagePath = storagePath
+        self.thumbnailURL = thumbnailURL
+        self.metadata = metadata
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.isDeleted = isDeleted
+    }
 } 

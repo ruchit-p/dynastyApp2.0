@@ -131,11 +131,13 @@ enum Vault {
                     title TEXT,
                     description TEXT,
                     file_type TEXT,
-                    encrypted_file_url TEXT,
+                    encrypted_file_name TEXT,
+                    storage_path TEXT,
                     thumbnail_url TEXT,
                     metadata TEXT,
                     created_at TEXT,
-                    updated_at TEXT
+                    updated_at TEXT,
+                    is_deleted INTEGER DEFAULT 0
                 );
             """
             
@@ -194,9 +196,8 @@ enum Vault {
             while sqlite3_step(queryStatement) == SQLITE_ROW {
                 autoreleasepool {
                     do {
-                        if let item = try extractVaultItem(from: queryStatement) {
-                            items.append(item)
-                        }
+                        let item = try extractVaultItem(from: queryStatement)
+                        items.append(item)
                     } catch {
                         logger.error("Failed to extract vault item: \(error.localizedDescription)")
                     }
@@ -207,45 +208,45 @@ enum Vault {
             return items
         }
         
-        private func extractVaultItem(from statement: OpaquePointer?) throws -> VaultItem? {
+        private func extractVaultItem(from statement: OpaquePointer?) throws -> VaultItem {
             guard let statement = statement else {
                 throw DatabaseError.invalidData("Invalid statement")
             }
             
-            return autoreleasepool {
+            return try autoreleasepool {
                 guard let id = sqlite3_column_text(statement, 0).map({ String(cString: $0) }),
                       let userId = sqlite3_column_text(statement, 1).map({ String(cString: $0) }),
                       let title = sqlite3_column_text(statement, 2).map({ String(cString: $0) }),
-                      let fileType = sqlite3_column_text(statement, 4).map({ String(cString: $0) }),
-                      let encryptedFileURL = sqlite3_column_text(statement, 5).map({ String(cString: $0) }),
-                      let metadataString = sqlite3_column_text(statement, 7).map({ String(cString: $0) }),
-                      let createdAt = sqlite3_column_text(statement, 8).map({ String(cString: $0) }),
-                      let updatedAt = sqlite3_column_text(statement, 9).map({ String(cString: $0) }) else {
-                    return nil
+                      let fileTypeStr = sqlite3_column_text(statement, 4).map({ String(cString: $0) }),
+                      let encryptedFileName = sqlite3_column_text(statement, 5).map({ String(cString: $0) }),
+                      let storagePath = sqlite3_column_text(statement, 6).map({ String(cString: $0) }),
+                      let metadataString = sqlite3_column_text(statement, 8).map({ String(cString: $0) }),
+                      let createdAtStr = sqlite3_column_text(statement, 9).map({ String(cString: $0) }),
+                      let updatedAtStr = sqlite3_column_text(statement, 10).map({ String(cString: $0) }),
+                      let fileType = VaultItemType(rawValue: fileTypeStr),
+                      let metadata = try? JSONDecoder().decode(VaultItemMetadata.self, from: Data(metadataString.utf8)),
+                      let createdAt = ISO8601DateFormatter().date(from: createdAtStr),
+                      let updatedAt = ISO8601DateFormatter().date(from: updatedAtStr) else {
+                    throw DatabaseError.invalidData("Failed to extract VaultItem data from database")
                 }
                 
                 let description = sqlite3_column_text(statement, 3).map { String(cString: $0) }
-                let thumbnailURL = sqlite3_column_text(statement, 6).map { String(cString: $0) }
-                
-                let decoder = JSONDecoder()
-                guard let metadata = try? decoder.decode(VaultItemMetadata.self, from: Data(metadataString.utf8)),
-                      let createdDate = ISO8601DateFormatter().date(from: createdAt),
-                      let updatedDate = ISO8601DateFormatter().date(from: updatedAt),
-                      let type = VaultItemType(rawValue: fileType) else {
-                    return nil
-                }
+                let thumbnailURL = sqlite3_column_text(statement, 7).map { String(cString: $0) }
+                let isDeleted = sqlite3_column_int(statement, 11) != 0
                 
                 return VaultItem(
                     id: id,
                     userId: userId,
                     title: title,
                     description: description,
-                    fileType: type,
-                    encryptedFileURL: encryptedFileURL,
+                    fileType: fileType,
+                    encryptedFileName: encryptedFileName,
+                    storagePath: storagePath,
                     thumbnailURL: thumbnailURL,
                     metadata: metadata,
-                    createdAt: createdDate,
-                    updatedAt: updatedDate
+                    createdAt: createdAt,
+                    updatedAt: updatedAt,
+                    isDeleted: isDeleted
                 )
             }
         }
@@ -332,38 +333,36 @@ enum Vault {
             }
             
             let encoder = JSONEncoder()
-            let dateFormatter = ISO8601DateFormatter()
-            
-            // Bind values
-            sqlite3_bind_text(statement, 1, (item.id as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 2, (item.userId as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 3, (item.title as NSString).utf8String, -1, nil)
-            
-            if let description = item.description {
-                sqlite3_bind_text(statement, 4, (description as NSString).utf8String, -1, nil)
-            } else {
-                sqlite3_bind_null(statement, 4)
-            }
-            
-            sqlite3_bind_text(statement, 5, (item.fileType.rawValue as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 6, (item.encryptedFileURL as NSString).utf8String, -1, nil)
-            
-            if let thumbnailURL = item.thumbnailURL {
-                sqlite3_bind_text(statement, 7, (thumbnailURL as NSString).utf8String, -1, nil)
-            } else {
-                sqlite3_bind_null(statement, 7)
-            }
-            
             let metadataData = try encoder.encode(item.metadata)
             guard let metadataString = String(data: metadataData, encoding: .utf8) else {
                 throw DatabaseError.invalidData("Failed to encode metadata")
             }
-            sqlite3_bind_text(statement, 8, (metadataString as NSString).utf8String, -1, nil)
             
+            let dateFormatter = ISO8601DateFormatter()
             let createdAtString = dateFormatter.string(from: item.createdAt)
             let updatedAtString = dateFormatter.string(from: item.updatedAt)
-            sqlite3_bind_text(statement, 9, (createdAtString as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 10, (updatedAtString as NSString).utf8String, -1, nil)
+            
+            // Bind values in order of columns
+            sqlite3_bind_text(statement, 1, NSString(string: item.id).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 2, NSString(string: item.userId).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 3, NSString(string: item.title).utf8String, -1, nil)
+            if let description = item.description {
+                sqlite3_bind_text(statement, 4, NSString(string: description).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(statement, 4)
+            }
+            sqlite3_bind_text(statement, 5, NSString(string: item.fileType.rawValue).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 6, NSString(string: item.encryptedFileName).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 7, NSString(string: item.storagePath).utf8String, -1, nil)
+            if let thumbnailURL = item.thumbnailURL {
+                sqlite3_bind_text(statement, 8, NSString(string: thumbnailURL).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(statement, 8)
+            }
+            sqlite3_bind_text(statement, 9, NSString(string: metadataString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 10, NSString(string: createdAtString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 11, NSString(string: updatedAtString).utf8String, -1, nil)
+            sqlite3_bind_int(statement, 12, item.isDeleted ? 1 : 0)
         }
         
         deinit {

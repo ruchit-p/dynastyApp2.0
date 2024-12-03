@@ -10,6 +10,10 @@ struct DocumentsView: View {
     @State private var isRefreshing = false
     @Environment(\.dismiss) private var dismiss
     
+    private let gridColumns = [
+        GridItem(.adaptive(minimum: 150, maximum: 150), spacing: 12)
+    ]
+    
     var body: some View {
         Group {
             if viewModel.isLoading && !isRefreshing {
@@ -19,6 +23,7 @@ struct DocumentsView: View {
             }
         }
         .navigationTitle("Documents")
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: { isShowingDocumentPicker = true }) {
@@ -32,6 +37,7 @@ struct DocumentsView: View {
                 guard let userId = authManager.user?.id else { return }
                 Task {
                     await viewModel.importDocuments(from: urls, userId: userId)
+                    isShowingDocumentPicker = false
                     await viewModel.loadDocuments(userId: userId)
                 }
             }
@@ -81,16 +87,14 @@ struct DocumentsView: View {
     
     private var contentView: some View {
         ScrollView {
-            LazyVGrid(columns: [
-                GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 16)
-            ], spacing: 16) {
+            LazyVGrid(columns: gridColumns, spacing: 12) {
                 ForEach(viewModel.documents) { document in
                     DocumentCell(document: document) {
                         selectedDocument = document
                     }
                 }
             }
-            .padding()
+            .padding(.horizontal, 8)
         }
         .overlay {
             if viewModel.documents.isEmpty && !viewModel.isLoading && !isRefreshing {
@@ -170,7 +174,7 @@ struct DocumentCell: View {
                 Image(systemName: iconName)
                     .font(.system(size: 40))
                     .foregroundColor(.accentColor)
-                    .frame(height: 120)
+                    .frame(height: 80)
                 
                 Text(document.title)
                     .font(.caption)
@@ -183,6 +187,7 @@ struct DocumentCell: View {
                     .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity)
+            .frame(height: 150)
             .padding(8)
             .background(Color(.systemBackground))
             .cornerRadius(12)
