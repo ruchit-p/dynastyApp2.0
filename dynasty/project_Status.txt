@@ -1,5 +1,3 @@
-Here is the entire Project Status Page: Dynasty in Markdown format:
-
 # Project Status Page: Dynasty
 
 ---
@@ -66,6 +64,12 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
 
 ## 3. Development Outline
 
+- **Current Development Focus:**
+  - Implementing secure Firebase Storage integration for vault
+  - End-to-end encryption for user files
+  - Document/photo/video upload and management
+  - Secure file access control
+  
 - **Technologies Used:**  
   - Swift  
   - Firebase  
@@ -76,24 +80,17 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
   - Firebase Storage  
   - Firebase Functions  
   - AuthenticationServices (Apple Sign-In)
-  - CryptoKit (Secure Authentication)
+  - CryptoKit (File Encryption)
   - LocalAuthentication (Biometric Security)
   - os.log (System Logging)
 
 - **Security Features:**
-  - Multi-factor authentication
-  - Biometric authentication with fallback
-  - Attempt limiting and lockout
-  - Session management
-  - Token refresh
-  - Comprehensive error handling
-  - Security state logging
-  - User session validation
-  - Secure credential storage
-  - Cryptographic nonce generation
-
-- **Infrastructure:**  
-  - Firebase for backend services and hosting  
+  - Multi-factor authentication ✅
+  - Biometric authentication with fallback ✅
+  - End-to-end file encryption 🚧
+  - Secure file storage and retrieval 🚧
+  - User-specific encryption keys 🚧
+  - File access control 🚧
 
 ---
 
@@ -101,24 +98,20 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
 
 1. **Initiation Phase:** Complete ✅
 2. **Authentication Phase:** Complete ✅
-   - Basic email/password authentication
-   - Apple Sign In integration with full name handling
-   - Biometric authentication integration
-   - Comprehensive error handling
-   - Security logging implementation
-   - User profile creation
-   - Family tree initialization
-3. **Current Sprint/Phase:** Security Implementation & Family Tree
-   - Implementing secure vault access
-   - Setting up biometric authentication with fallback
-   - Implementing attempt limiting
-   - Developing family tree visualization
-4. **Next Milestones:**  
-   - Complete vault security implementation
-   - Implement interactive Family Tree canvas
-   - Add member management functionality
-   - Develop Feed system
-   - Launch beta testing
+3. **Current Sprint/Phase:** Vault Storage Implementation
+   - Implementing Firebase Storage integration
+   - Setting up end-to-end encryption for files
+   - Creating secure file upload/download system
+   - Implementing file access control
+4. **Next Phase:** Family Tree Development
+   - Interactive canvas implementation
+   - Member management functionality
+   - Tree visualization
+   - Permission system
+5. **Future Phases:**
+   - Feed system development
+   - Beta testing
+   - Performance optimization
 
 ---
 
@@ -141,25 +134,45 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
 - Attempt limiting system
 - Session validation
 - Token refresh mechanism
+- Auto-lock functionality for vault
+- SQLite database integrity protection
+- Tab-based authentication tracking
+- Secure cache management
+
+### Immediate Focus (Vault Storage)
+1. Set up Firebase Storage integration
+2. Implement end-to-end encryption for files
+3. Create secure file upload/download system
+4. Implement file access control
+5. Add file management UI
+6. Test encryption/decryption performance
+7. Implement secure file deletion
+
+### Next Focus (Family Tree)
+1. Design interactive canvas
+2. Implement member management
+3. Create tree visualization
+4. Set up permission system
+5. Add member information display
 
 ### Tasks in Progress 🚧
-- Vault security features refinement
-- Family Tree Diagram interactive canvas
-- Member addition and editing functionality
-- Permission system implementation
-- Tree visualization components
+- Firebase Storage integration
+- End-to-end file encryption system
+- File upload/download functionality
+- File access control implementation
+- Secure file management
 
-### Security Improvements Made 🔒
-- Added biometric authentication with passcode fallback
-- Implemented comprehensive error handling
-- Added detailed security logging
-- Enhanced user feedback for authentication issues
-- Improved credential validation
-- Added session management
-- Implemented secure state handling
-- Added attempt limiting and lockout
-- Added token refresh mechanism
-- Added biometric availability checking
+### Upcoming Tasks
+- Family Tree canvas development
+- Member management system
+- Tree visualization components
+- Permission system implementation
+
+### Security Improvements
+- End-to-end file encryption
+- Secure file storage and retrieval
+- User-specific encryption keys
+- File access control
 
 ### Issues/Risks Identified
 - Ensuring seamless scalability of Firestore database
@@ -178,86 +191,133 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
 4. Implement permission system
 5. Add member information display
 
----
+### Technical Requirements for Vault Storage
 
-## 6. Visual Workflows
+#### Firebase Storage Integration
+- Secure file upload/download
+- Progress tracking
+- Error handling
+- Retry mechanisms
+- File type validation
 
-### Authentication Workflow (Implemented ✅)
+#### End-to-End Encryption
+- User-specific encryption keys
+- Secure key storage
+- File encryption/decryption
+- Metadata protection
+- Secure key rotation
+
+#### File Management
+- File organization system
+- Thumbnail generation
+- File type handling
+- Version control
+- Deletion management
+
+### Vault Storage Workflow
 ```plaintext
-User opens app
+User authenticated in vault
       ↓
-Choose Sign In Method
+Select file to upload
       ↓
-Email/Password or Apple Sign In
+Generate encryption key
       ↓
-Validate Credentials
+Encrypt file locally
       ↓
-Handle Authentication Response
+Upload to Firebase Storage
       ↓
-If new user → Create Profile
+Store encrypted metadata
       ↓
-Initialize Family Tree & History Book
+Update user's file index
       ↓
-Prompt for Face ID Setup
+Generate secure thumbnail
       ↓
-Main App Interface
+Enable file management
 ```
 
-### Vault Access Workflow (Enhanced 🔒)
+### File Access Workflow
 ```plaintext
-User attempts to access vault
+Request file access
       ↓
-Check Biometric Availability
+Verify user authentication
       ↓
-Attempt Biometric Authentication
+Retrieve encryption key
       ↓
-If Failed → Fallback to Passcode
+Download encrypted file
       ↓
-Track Authentication Attempts
+Decrypt file locally
       ↓
-If Too Many Failures → Lockout
+Display/open file
       ↓
-If Successful → Show Vault Content
-      ↓
-Monitor Session State
-      ↓
-Refresh Token as Needed
+Secure cleanup after use
 ```
 
-### Family Tree Diagram Workflow (Current Focus)
-```plaintext
-User views Family Tree (View Mode)
-      ↓
-Switch to Edit Mode (if permitted)
-      ↓
-Add Family Member (Open Form)
-      ↓
-Submit Form (Save to Firestore)
-      ↓
-Tree Updates Dynamically
-      ↓
-View Member Details (Info Page)
-      ↓
-Show History Book Entries
-```
+## 6. Next Steps
 
-### Feed Functionality Workflow (Upcoming)
-```plaintext
-Fetch Posts from Firestore
-      ↓
-Render Posts in Feed
-      ↓
-Open 'New Post' Form
-      ↓
-Submit Post (Save to Firestore)
-      ↓
-Open RSVP (Select Invitees)
-      ↓
-Save RSVP Status to Firestore
-```
+### Immediate Actions (Vault Storage)
+1. Set up Firebase Storage bucket
+2. Implement file encryption system
+3. Create file upload/download handlers
+4. Build file management UI
+5. Implement secure file deletion
+6. Test encryption performance
+7. Add progress indicators
+
+### Following Phase (Family Tree)
+1. Design tree canvas layout
+2. Create member management system
+3. Implement visualization components
+4. Set up permission controls
+5. Add member data handling
 
 ## 7. Goals and Vision
 
-- **End Goal:** To create a close-knit social media platform for family members to securely share their stories with their loved ones.
-- **Current Priority:** Implementing robust security features while maintaining excellent user experience.
-- **Security Focus:** Ensuring user data protection through multi-layer authentication and secure storage.
+- **Current Priority:** Implementing secure file storage and management in the vault
+- **Next Priority:** Developing interactive family tree functionality
+- **Long-term Vision:** Creating a comprehensive family history platform with secure document storage and sharing
+
+## 8. Technical Context & Implementation Notes
+
+### Authentication Implementation
+- Using Firebase Auth with Apple Sign In as primary authentication
+- Biometric authentication implemented with LocalAuthentication framework
+- Auto-lock functionality based on tab selection and background state
+- SQLite database for secure local storage
+
+### Vault Storage Implementation Notes
+- Firebase Storage selected for scalable cloud storage
+- Client-side encryption approach:
+  - Files encrypted before upload using CryptoKit
+  - Unique encryption keys per user
+  - Keys never transmitted to server
+  - Metadata stored separately from files
+- File types supported:
+  - Documents (.pdf, .doc, .docx, etc.)
+  - Images (.jpg, .png, .heic)
+  - Videos (.mp4, .mov)
+  - Audio (.mp3, .m4a)
+
+### Security Decisions
+- End-to-end encryption for all vault files
+- No server-side file processing to maintain security
+- Secure key storage in Keychain
+- Automatic file cleanup after viewing
+- No cloud-based thumbnail generation
+- Local thumbnail caching with encryption
+
+### Performance Considerations
+- Large file handling with chunked upload
+- Background upload support
+- Local caching strategy for frequently accessed files
+- Thumbnail generation optimizations
+- Memory management for large media files
+
+### Future Considerations
+- Potential backup key recovery system
+- Family sharing capabilities
+- Version control for documents
+- Collaborative document editing
+- Cross-device synchronization
+- Offline access capabilities
+
+This section will be updated as new technical decisions and implementation details are finalized.
