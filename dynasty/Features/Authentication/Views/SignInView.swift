@@ -2,6 +2,8 @@ import SwiftUI
 import FirebaseAuth
 import AuthenticationServices
 import CryptoKit
+import LocalAuthentication
+import os.log
 
 struct SignInView: View {
     @EnvironmentObject private var authManager: AuthManager
@@ -9,6 +11,8 @@ struct SignInView: View {
     @State private var password: String = ""
     @State private var errorMessage: String?
     @State private var currentNonce: String?
+    @State private var showingFaceIDSetup = false
+    private let logger = Logger(subsystem: "com.dynasty.SignInView", category: "Authentication")
     
     var body: some View {
         NavigationView {
@@ -31,10 +35,17 @@ struct SignInView: View {
                 // Email TextField
                 TextField("Enter your email", text: $email)
                     .keyboardType(.emailAddress)
+                    .autocapitalization(.none)
                     .padding()
                     .background(Color(.systemGray6))
                     .cornerRadius(10)
                     .padding(.horizontal, 40)
+                    .onAppear {
+                        // Pre-fill email if available
+                        if let savedEmail = authManager.getLastSignInEmail() {
+                            email = savedEmail
+                        }
+                    }
                 
                 // Password SecureField
                 SecureField("Enter your password", text: $password)
@@ -91,9 +102,42 @@ struct SignInView: View {
                 Spacer()
             }
             .navigationBarHidden(true)
+            .alert("Enable Face ID", isPresented: $showingFaceIDSetup) {
+                Button("Enable") {
+                    authManager.enableFaceID()
+                }
+                Button("Not Now", role: .cancel) { }
+            } message: {
+                Text("Would you like to enable Face ID for quick sign-in next time?")
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
+        .onAppear {
+            // Check if Face ID is enabled and try to authenticate
+            if authManager.isFaceIDEnabled() {
+                authenticateWithFaceID()
+            }
+        }
+    }
+    
+    private func authenticateWithFaceID() {
+        let context = LAContext()
+        var error: NSError?
+        
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                                 localizedReason: "Sign in to Dynasty") { success, error in
+                if success {
+                    // If we have saved email, try to sign in
+                    if let savedEmail = authManager.getLastSignInEmail() {
+                        email = savedEmail
+                        // Note: Password should be handled securely through Keychain
+                        // For now, user will need to enter password
+                    }
+                }
+            }
+        }
     }
     
     // Function to handle email/password sign-in
@@ -121,41 +165,55 @@ struct SignInView: View {
     private func handleSignInWithApple(_ result: Result<ASAuthorization, Error>) {
         switch result {
         case .success(let authResults):
-            if let appleIDCredential = authResults.credential as? ASAuthorizationAppleIDCredential,
-               let nonce = currentNonce,
-               let appleIDToken = appleIDCredential.identityToken,
-               let idTokenString = String(data: appleIDToken, encoding: .utf8) {
-                
-                let credential = OAuthProvider.credential(
-                    withProviderID: "apple.com",
-                    idToken: idTokenString,
-                    rawNonce: nonce
-                )
-                
-                Task {
-                    do {
-                        try await authManager.signInWithApple(credential: credential)
-                    } catch {
-                        errorMessage = error.localizedDescription
-                    }
+            logger.info("Apple Sign In authorization successful")
+            guard let appleIDCredential = authResults.credential as? ASAuthorizationAppleIDCredential,
+                  let nonce = currentNonce,
+                  let appleIDToken = appleIDCredential.identityToken,
+                  let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+                logger.error("Failed to get required credentials from Apple Sign In")
+                errorMessage = "Failed to get required credentials"
+                return
+            }
+            
+            logger.info("Got Apple ID credentials, creating Firebase credential")
+            // Create the Firebase credential
+            let credential = OAuthProvider.credential(
+                withProviderID: "apple.com",
+                idToken: idTokenString,
+                rawNonce: nonce
+            )
+            
+            Task {
+                do {
+                    logger.info("Attempting to sign in with Apple credential")
+                    try await authManager.signInWithApple(credential: credential)
+                    logger.info("Apple Sign In successful")
+                } catch {
+                    logger.error("Apple Sign In failed: \(error.localizedDescription)")
+                    errorMessage = error.localizedDescription
                 }
             }
+            
         case .failure(let error):
+            logger.error("Apple Sign In authorization failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
     }
     
-    // Generates a random nonce string
-    @available(iOS 13, *)
+    // Generates a cryptographically secure random nonce string
     private func randomNonceString(length: Int = 32) -> String {
-        let characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-._"
-        var nonce = ""
-        for _ in 0..<length {
-            let randomIndex = Int.random(in: 0..<characters.count)
-            let randomCharacter = characters[characters.index(characters.startIndex, offsetBy: randomIndex)]
-            nonce.append(randomCharacter)
+        precondition(length > 0)
+        var randomBytes = [UInt8](repeating: 0, count: length)
+        let errorCode = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
+        if errorCode != errSecSuccess {
+            fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(errorCode)")
         }
-        return nonce
+
+        let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        let nonce = randomBytes.map { byte in
+            charset[Int(byte) % charset.count]
+        }
+        return String(nonce)
     }
     
     // Hashes the nonce using SHA256

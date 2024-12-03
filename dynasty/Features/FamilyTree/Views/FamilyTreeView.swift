@@ -1,344 +1,288 @@
 import SwiftUI
-import FirebaseFirestore
-import FirebaseAuth
+import Firebase
 
 struct FamilyTreeView: View {
-    @State private var familyMembers: [FamilyMember] = []
-    @State private var relationships: [Relationship] = []
-    @State private var user: User?
+    @StateObject private var viewModel: FamilyTreeViewModel
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
-    @State private var showAddButtons: Bool = false
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    let db = Firestore.firestore()
-    @State private var familyTreeID: String = ""
-    @State private var showAdminManagement: Bool = false
-    @State private var isFamilyAdmin: Bool = false
-    @State private var listeners: [ListenerRegistration] = []
-    @State private var showingAddFamilyMemberForm = false
-    @State private var selectedRelationType: RelationType = .child
-    @State private var selectedMember: FamilyMember?
-    @EnvironmentObject var authManager: AuthManager
+    @State private var showingAddMemberSheet = false
+    @State private var showingMemberDetails = false
+    @State private var selectedMember: FamilyTreeNode?
+    
+    init(treeId: String, userId: String) {
+        _viewModel = StateObject(wrappedValue: FamilyTreeViewModel(treeId: treeId, userId: userId))
+    }
     
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                if isLoading {
-                    loadingView
-                } else if let error = errorMessage {
-                    errorView(error: error)
-                } else if familyMembers.isEmpty {
-                    emptyStateView
-                } else {
-                    familyTreeContent(geometry: geometry)
-                }
-            }
-        }
-        .onAppear {
-            fetchInitialUserData()
-        }
-        .onDisappear {
-            removeListeners()
-        }
-    }
-    
-    // MARK: - Subviews
-    
-    private var loadingView: some View {
-        ProgressView("Loading family tree...")
-    }
-    
-    private func errorView(error: String) -> some View {
-        VStack {
-            Text("Error loading family tree")
-                .font(.headline)
-            Text(error)
-                .font(.subheadline)
-                .foregroundColor(.red)
-            Button("Retry") {
-                fetchInitialUserData()
-            }
-        }
-    }
-    
-    private var emptyStateView: some View {
-        VStack {
-            Text("No family members found")
-                .font(.headline)
-            Button("Add First Member") {
-                showingAddFamilyMemberForm = true
-                selectedRelationType = .child
-                selectedMember = createDefaultMember()
-            }
-        }
-    }
-    
-    private func familyTreeContent(geometry: GeometryProxy) -> some View {
-        ScrollView([.horizontal, .vertical], showsIndicators: true) {
-            ZStack {
-                Color.white
-                    .frame(width: max(geometry.size.width * 2, 1000),
-                           height: max(geometry.size.height * 2, 1000))
-                
-                // Drawing relationship lines
-                ForEach(relationships) { relationship in
-                    if let fromMember = familyMembers.first(where: { $0.id == relationship.fromMemberID }),
-                       let toMember = familyMembers.first(where: { $0.id == relationship.toMemberID }) {
-                        ConnectionLine(
-                            fromPosition: calculateNodePosition(for: fromMember, in: geometry.size),
-                            toPosition: calculateNodePosition(for: toMember, in: geometry.size)
+        ZStack {
+            // Background
+            Color(.systemBackground)
+                .ignoresSafeArea()
+            
+            // Tree Content
+            ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                ZStack {
+                    // Tree Canvas
+                    FamilyTreeCanvas(viewModel: viewModel)
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    scale = value.magnitude
+                                }
                         )
+                        .gesture(
+                            DragGesture()
+                                .onChanged { value in
+                                    offset = CGSize(
+                                        width: value.translation.width + offset.width,
+                                        height: value.translation.height + offset.height
+                                    )
+                                }
+                        )
+                    
+                    // Loading Indicator
+                    if viewModel.isLoading {
+                        ProgressView()
+                    }
+                    
+                    // Error View
+                    if let error = viewModel.error {
+                        ErrorView(error: error)
                     }
                 }
-                
-                // Drawing family member nodes
-                ForEach(familyMembers) { member in
-                    FamilyMemberNodeView(member: member)
-                        .position(calculateNodePosition(for: member, in: geometry.size))
-                        .onTapGesture {
-                            showAddButtons.toggle()
-                            selectedMember = member
-                        }
-                }
-            }
-            .frame(width: max(geometry.size.width * 2, 1000),
-                   height: max(geometry.size.height * 2, 1000))
-            .scaleEffect(scale)
-            .offset(offset)
-            .gesture(magnificationGesture())
-            .gesture(dragGesture())
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Admin") {
-                    showAdminManagement = true
-                }
-                .disabled(!isFamilyAdmin)
-            }
-        }
-        .sheet(isPresented: $showingAddFamilyMemberForm) {
-            if let user = user {
-                AddFamilyMemberForm(
-                    relationType: $selectedRelationType,
-            selectedMember: selectedMember ?? createDefaultMember(),
-            user: user
-        )
-            }
-        }
-        .sheet(isPresented: $showAdminManagement) {
-            AdminManagementView(familyTreeID: familyTreeID)
-        }
-    }
-    
-    // MARK: - Helper Methods
-    
-    private func removeListeners() {
-        listeners.forEach { $0.remove() }
-        listeners.removeAll()
-    }
-    
-    private func createDefaultMember() -> FamilyMember {
-        return FamilyMember(
-            firstName: user?.firstName ?? "",
-            lastName: user?.lastName ?? "",
-            email: user?.email ?? "",
-            isRegisteredUser: true
-        )
-    }
-    
-    private func calculateNodePosition(for member: FamilyMember, in size: CGSize) -> CGPoint {
-        // For initial single node, center it
-        if familyMembers.count == 1 {
-            return CGPoint(x: size.width / 2, y: size.height / 2)
-        }
-        
-        // Placeholder logic for node positioning
-        // TODO: Implement actual layout algorithm based on relationships
-        let index = familyMembers.firstIndex(where: { $0.id == member.id }) ?? 0
-        let angle = Double(index) * (360.0 / Double(familyMembers.count))
-        let radius: Double = 200
-
-        let x = size.width / 2 + CGFloat(cos(angle) * radius)
-        let y = size.height / 2 + CGFloat(sin(angle) * radius)
-
-        return CGPoint(x: x, y: y)
-    }
-    
-    private func magnificationGesture() -> some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                self.scale = value.magnitude
-            }
-    }
-    
-    private func dragGesture() -> some Gesture {
-        DragGesture()
-            .onChanged { gesture in
-                self.offset = gesture.translation
-            }
-    }
-    
-    // Include your existing methods like fetchInitialUserData(), fetchFamilyTreeData(), etc.
-    
-    private func fetchInitialUserData() {
-        isLoading = true
-        errorMessage = nil
-        
-        guard let currentUser = Auth.auth().currentUser else {
-            errorMessage = "No authenticated user"
-            isLoading = false
-            return
-        }
-        
-        db.collection(Constants.Firebase.usersCollection)
-            .document(currentUser.uid)
-            .getDocument { document, error in
-                if let error = error {
-                    DispatchQueue.main.async {
-                        self.errorMessage = "Error fetching user document: \(error.localizedDescription)"
-                        self.isLoading = false
-                    }
-                    return
-                }
-                
-                guard let document = document, document.exists else {
-                    DispatchQueue.main.async {
-                        self.errorMessage = "User document does not exist"
-                        self.isLoading = false
-                    }
-                    return
-                }
-                
-                do {
-                    var userData = try document.data(as: User.self)
-                    userData.id = document.documentID
-                    self.user = userData
-
-                    if let familyTreeID = userData.familyTreeID, !familyTreeID.isEmpty {
-                        self.familyTreeID = familyTreeID
-                        self.fetchFamilyTreeData()
-                    } else {
-                        DispatchQueue.main.async {
-                            self.errorMessage = "Family tree ID is missing; please create a family tree."
-                            self.isLoading = false
-                        }
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.errorMessage = "Error decoding user data: \(error.localizedDescription)"
-                        self.isLoading = false
-                    }
-                }
-            }
-    }
-    
-    private func fetchFamilyTreeData() {
-        guard !familyTreeID.isEmpty else {
-            DispatchQueue.main.async {
-                self.errorMessage = "Family tree ID is empty"
-                self.isLoading = false
-            }
-            return
-        }
-        
-        let familyTreeRef = db.collection(Constants.Firebase.familyTreesCollection)
-            .document(familyTreeID)
-        
-        // Fetch the family tree document
-        familyTreeRef.getDocument { document, error in
-            if let error = error {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Error fetching family tree: \(error.localizedDescription)"
-                    self.isLoading = false
-                }
-                return
             }
             
-            guard let document = document, document.exists else {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Family tree document does not exist"
-                    self.isLoading = false
+            // Toolbar Overlay
+            VStack {
+                HStack {
+                    // Edit Mode Toggle
+                    Button(action: {
+                        viewModel.isEditMode.toggle()
+                    }) {
+                        Image(systemName: viewModel.isEditMode ? "pencil.circle.fill" : "pencil.circle")
+                            .font(.title2)
+                    }
+                    
+                    Spacer()
+                    
+                    // Add Member Button (only visible in edit mode)
+                    if viewModel.isEditMode {
+                        Button(action: {
+                            showingAddMemberSheet = true
+                        }) {
+                            Image(systemName: "person.badge.plus")
+                                .font(.title2)
+                        }
+                    }
+                    
+                    // Reset View Button
+                    Button(action: {
+                        withAnimation {
+                            scale = 1.0
+                            offset = .zero
+                        }
+                    }) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.title2)
+                    }
                 }
-                return
+                .padding()
+                .background(Color(.systemBackground).opacity(0.8))
+                .cornerRadius(15)
+                .padding()
+                
+                Spacer()
             }
+        }
+        .sheet(isPresented: $showingAddMemberSheet) {
+            AddMemberView(viewModel: viewModel)
+        }
+        .sheet(item: $selectedMember) { member in
+            MemberDetailsView(member: member, viewModel: viewModel)
+        }
+    }
+}
+
+// MARK: - Supporting Views
+
+struct FamilyTreeCanvas: View {
+    @ObservedObject var viewModel: FamilyTreeViewModel
+    
+    var body: some View {
+        // This is a placeholder for the actual tree rendering
+        // We'll implement the tree layout algorithm in the next step
+        Text("Tree Canvas - Coming Soon")
+    }
+}
+
+struct ErrorView: View {
+    let error: Error
+    
+    var body: some View {
+        VStack {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle)
+                .foregroundColor(.red)
+            Text("Error")
+                .font(.headline)
+            Text(error.localizedDescription)
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .padding()
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(15)
+        .shadow(radius: 5)
+    }
+}
+
+struct AddMemberView: View {
+    @ObservedObject var viewModel: FamilyTreeViewModel
+    @Environment(\.dismiss) private var dismiss
+    
+    // Form fields
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var dateOfBirth = Date()
+    @State private var gender: FamilyTreeNode.Gender = .unknown
+    @State private var email = ""
+    @State private var phoneNumber = ""
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Basic Information")) {
+                    TextField("First Name", text: $firstName)
+                    TextField("Last Name", text: $lastName)
+                    DatePicker("Date of Birth", selection: $dateOfBirth, displayedComponents: .date)
+                    Picker("Gender", selection: $gender) {
+                        Text("Male").tag(FamilyTreeNode.Gender.male)
+                        Text("Female").tag(FamilyTreeNode.Gender.female)
+                        Text("Other").tag(FamilyTreeNode.Gender.other)
+                        Text("Unknown").tag(FamilyTreeNode.Gender.unknown)
+                    }
+                }
+                
+                Section(header: Text("Contact Information")) {
+                    TextField("Email", text: $email)
+                        .keyboardType(.emailAddress)
+                        .autocapitalization(.none)
+                    TextField("Phone Number", text: $phoneNumber)
+                        .keyboardType(.phonePad)
+                }
+            }
+            .navigationTitle("Add Family Member")
+            .navigationBarItems(
+                leading: Button("Cancel") {
+                    dismiss()
+                },
+                trailing: Button("Add") {
+                    addMember()
+                }
+            )
+        }
+    }
+    
+    private func addMember() {
+        Task {
+            let newMember = FamilyTreeNode(
+                id: UUID().uuidString,
+                firstName: firstName,
+                lastName: lastName,
+                dateOfBirth: dateOfBirth,
+                gender: gender,
+                email: email.isEmpty ? nil : email,
+                phoneNumber: phoneNumber.isEmpty ? nil : phoneNumber,
+                photoURL: nil,
+                parentIds: [],
+                spouseIds: [],
+                childrenIds: [],
+                isRegisteredUser: false,
+                canEdit: true,
+                updatedAt: Timestamp()
+            )
             
             do {
-                let familyTree = try document.data(as: FamilyTree.self)
-                // Update any necessary family tree properties here
-                DispatchQueue.main.async {
-                    self.isFamilyAdmin = familyTree.admins.contains(user?.id ?? "")
-                    self.isLoading = false
-                }
+                try await viewModel.addMember(newMember)
+                dismiss()
             } catch {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Error decoding family tree: \(error.localizedDescription)"
-                    self.isLoading = false
-                }
+                // Handle error (we should add an error alert here)
+                print("Error adding member: \(error.localizedDescription)")
             }
-            
-            // Set up listeners for members and relationships
-            self.setupMembersListener(familyTreeRef)
-            self.setupRelationshipsListener(familyTreeRef)
         }
     }
+}
+
+struct MemberDetailsView: View {
+    let member: FamilyTreeNode
+    @ObservedObject var viewModel: FamilyTreeViewModel
+    @Environment(\.dismiss) private var dismiss
     
-    private func setupMembersListener(_ familyTreeRef: DocumentReference) {
-        let listener = familyTreeRef.collection("members")
-            .addSnapshotListener { snapshot, error in
-                if let error = error {
-                    DispatchQueue.main.async {
-                        self.errorMessage = "Error fetching members: \(error.localizedDescription)"
+    var body: some View {
+        NavigationView {
+            List {
+                Section(header: Text("Personal Information")) {
+                    LabeledContent("Name", value: member.fullName)
+                    if let dob = member.dateOfBirth {
+                        LabeledContent("Date of Birth", value: dob.formatted(date: .long, time: .omitted))
                     }
-                    return
+                    LabeledContent("Gender", value: member.gender.rawValue.capitalized)
                 }
                 
-                if let snapshot = snapshot {
-                    let members = snapshot.documents.compactMap { doc -> FamilyMember? in
-                        do {
-                            var member = try doc.data(as: FamilyMember.self)
-                            member.id = doc.documentID // Ensure the ID is set
-                            return member
-                        } catch {
-                            print("Error decoding member: \(error.localizedDescription)")
-                            return nil
-                        }
+                Section(header: Text("Contact Information")) {
+                    if let email = member.email {
+                        LabeledContent("Email", value: email)
                     }
-                    DispatchQueue.main.async {
-                        self.familyMembers = members
-                        print("Family members updated: \(self.familyMembers.count) members.")
+                    if let phone = member.phoneNumber {
+                        LabeledContent("Phone", value: phone)
+                    }
+                }
+                
+                Section(header: Text("Family Connections")) {
+                    NavigationLink("Parents (\(viewModel.getParents(member.id).count))") {
+                        RelativesList(relatives: viewModel.getParents(member.id), relationshipType: "Parent")
+                    }
+                    
+                    NavigationLink("Spouses (\(viewModel.getSpouses(member.id).count))") {
+                        RelativesList(relatives: viewModel.getSpouses(member.id), relationshipType: "Spouse")
+                    }
+                    
+                    NavigationLink("Children (\(viewModel.getChildren(member.id).count))") {
+                        RelativesList(relatives: viewModel.getChildren(member.id), relationshipType: "Child")
                     }
                 }
             }
-        listeners.append(listener)
+            .navigationTitle("Member Details")
+            .navigationBarItems(trailing: Button("Done") {
+                dismiss()
+            })
+        }
     }
+}
+
+struct RelativesList: View {
+    let relatives: [FamilyTreeNode]
+    let relationshipType: String
     
-    private func setupRelationshipsListener(_ familyTreeRef: DocumentReference) {
-        let listener = familyTreeRef.collection("relationships")
-            .addSnapshotListener { snapshot, error in
-                if let error = error {
-                    DispatchQueue.main.async {
-                        self.errorMessage = "Error fetching relationships: \(error.localizedDescription)"
-                    }
-                    return
-                }
-                
-                if let snapshot = snapshot {
-                    let relations = snapshot.documents.compactMap { doc -> Relationship? in
-                        do {
-                            var relationship = try doc.data(as: Relationship.self)
-                            relationship.id = doc.documentID
-                            return relationship
-                        } catch {
-                            print("Error decoding relationship: \(error.localizedDescription)")
-                            return nil
-                        }
-                    }
-                    DispatchQueue.main.async {
-                        self.relationships = relations
-                    }
+    var body: some View {
+        List(relatives) { relative in
+            VStack(alignment: .leading) {
+                Text(relative.fullName)
+                    .font(.headline)
+                if let dob = relative.dateOfBirth {
+                    Text(dob.formatted(date: .long, time: .omitted))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                 }
             }
-        listeners.append(listener)
+        }
+        .navigationTitle(relationshipType + "s")
     }
+}
+
+#Preview {
+    FamilyTreeView(treeId: "preview", userId: "preview")
 }

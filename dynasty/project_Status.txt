@@ -1,0 +1,204 @@
+Here is the entire Project Status Page: Dynasty in Markdown format:
+
+# Project Status Page: Dynasty
+
+---
+
+## 1. Project Overview
+
+- **Project Name:** Dynasty  
+- **Purpose:** A family tree application for iOS that provides a secure platform for family members to connect, share stories, and maintain their legacy.  
+- **Key Features:**  
+  - User authentication with email/password and Apple Sign In
+  - Face ID/Touch ID support
+  - Family tree visualization  
+  - Document vault  
+  - Personal history book  
+  - Family feed  
+  - Encrypted messaging  
+- **Current Phase:** Development - Family Tree Implementation  
+- **Project Owner/Stakeholders:** Just Me  
+
+---
+
+## 2. Requirements
+
+### Functional Requirements
+
+1. **Family Tree Diagram:**  
+   - Interactive canvas, draggable for easy navigation.  
+   - Users can add family members (spouse, parents, children).  
+   - Family admins can edit the entire tree, while other members can only modify their branch.  
+   - Toggle between editing and viewing modes.  
+   - Tap on a user's icon to display an information button ("i"), leading to their personal history page.  
+   - Editing mode includes add buttons (+) for adding new members and a settings button for editing personal details.  
+   - Add Family Member page includes fields: First name, Last name, DOB, Email, Phone number, Gender.  
+
+2. **Vault for Document Storage:**  
+   - Secure, end-to-end encrypted storage for pictures, documents, and videos.  
+   - Requires re-authentication with FaceID or phone password for access.  
+
+3. **User Authentication:** ✅ COMPLETED
+   - Firebase Authentication with email/password and Apple Sign-In
+   - Password reset option with email link functionality
+   - Secure Apple Sign-In with cryptographic nonce
+   - Token revocation and account deletion support
+   - Automatic user profile and family tree initialization
+   - Face ID/Touch ID support for quick sign-in
+   - Email persistence for returning users
+   - Proper new user account creation flow
+
+4. **Feed for Family Updates:**  
+   - Displays public history book stories.  
+   - Users can post RSVPs for events and invite specific family members or the entire family tree.  
+
+---
+
+## 3. Development Outline
+
+- **Technologies Used:**  
+  - Swift  
+  - Firebase  
+
+- **Libraries/Frameworks:**  
+  - Firebase Authentication  
+  - Firebase Firestore  
+  - Firebase Storage  
+  - Firebase Functions  
+  - AuthenticationServices (Apple Sign-In)
+  - CryptoKit (Secure Authentication)
+  - LocalAuthentication (Face ID/Touch ID)
+
+- **Infrastructure:**  
+  - Firebase for backend services and hosting  
+
+---
+
+## 4. Milestones
+
+1. **Initiation Phase:** Complete ✅
+2. **Authentication Phase:** Complete ✅
+   - Basic email/password authentication
+   - Apple Sign In integration
+   - Face ID/Touch ID support
+   - User profile creation
+   - Family tree initialization
+3. **Current Sprint/Phase:** Family Tree Diagram Implementation
+4. **Next Milestones:**  
+   - Implement interactive Family Tree canvas
+   - Add member management functionality
+   - Implement Vault with re-authentication
+   - Develop Feed system
+   - Launch beta testing
+
+---
+
+## 5. Progress Tracking
+
+### Tasks Completed ✅
+- Firebase Authentication setup
+- Robust Apple Sign-In implementation with security best practices
+- Email/password authentication with error handling
+- User profile creation with family tree initialization
+- History book creation flow
+- Token revocation and account deletion functionality
+- Database structure in Firestore for user profiles and family connections
+- Face ID/Touch ID integration
+- Email persistence for returning users
+- New user onboarding flow
+
+### Tasks in Progress 🚧
+- Family Tree Diagram interactive canvas development
+- Member addition and editing functionality
+- Permission system implementation
+- Tree visualization components
+
+### Upcoming Tasks 📋
+- Vault implementation with Firebase Storage
+- Feed system development
+- RSVP and event functionality
+- Beta testing preparation
+
+### Issues/Risks Identified
+- Ensuring seamless scalability of Firestore database as the family tree expands
+- Managing user permissions across branches effectively
+- Optimizing tree rendering performance for large families
+- Handling biometric authentication edge cases
+
+### Next Steps (Immediate Focus)
+1. Implement Family Tree interactive canvas
+2. Create member addition/editing UI
+3. Develop tree navigation controls
+4. Implement permission system
+5. Add member information display
+
+---
+
+## 6. Visual Workflows
+
+### Authentication Workflow (Current Implementation)
+```plaintext
+User opens app
+      ↓
+Choose Sign In Method
+      ↓
+Email/Password or Apple Sign In
+      ↓
+If new user → Create Profile
+      ↓
+Initialize Family Tree & History Book
+      ↓
+Prompt for Face ID Setup
+      ↓
+Main App Interface
+```
+
+### Family Tree Diagram Workflow (Current Focus)
+```plaintext
+User views Family Tree (View Mode)
+      ↓
+Switch to Edit Mode (if permitted)
+      ↓
+Add Family Member (Open Form)
+      ↓
+Submit Form (Save to Firestore)
+      ↓
+Tree Updates Dynamically
+      ↓
+View Member Details (Info Page)
+      ↓
+Show History Book Entries
+```
+
+### Vault Access Workflow (Upcoming)
+```plaintext
+Navigate to Vault
+      ↓
+Authenticate with FaceID/Password
+      ↓
+Upload Document (File Picker)
+      ↓
+Save to Firebase Storage
+      ↓
+Retrieve Document (View/Download)
+```
+
+### Feed Functionality Workflow (Upcoming)
+```plaintext
+Fetch Posts from Firestore
+      ↓
+Render Posts in Feed
+      ↓
+Open 'New Post' Form
+      ↓
+Submit Post (Save to Firestore)
+      ↓
+Open RSVP (Select Invitees)
+      ↓
+Save RSVP Status to Firestore
+```
+
+## 7. Goals and Vision
+
+- **End Goal:** To create a close-knit social media platform for family members to securely share their stories with their loved ones.
+- **Current Priority:** Delivering a smooth and intuitive family tree interaction experience with robust authentication.

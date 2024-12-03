@@ -2,6 +2,8 @@ import FirebaseAuth
 import FirebaseFirestore
 import Combine
 import os.log
+import AuthenticationServices
+import LocalAuthentication
 
 enum AuthError: Error {
     case signInError(String)
@@ -47,6 +49,7 @@ class AuthManager: ObservableObject {
     @Published private(set) var user: User?
     @Published var isAuthenticated = false
     @Published private(set) var authState: AuthState = .unknown
+    @Published var shouldShowFaceIDSetupPrompt = false
     
     private var authStateListener: AuthStateDidChangeListenerHandle?
     private let db: Firestore
@@ -271,10 +274,187 @@ class AuthManager: ObservableObject {
     
     func signInWithApple(credential: AuthCredential) async throws {
         do {
+            logger.info("Starting Apple Sign In process")
             let result = try await auth.signIn(with: credential)
-            await loadUserData(userId: result.user.uid)
+            let firebaseUser = result.user
+            logger.info("Firebase Auth successful for user: \(firebaseUser.uid)")
+            
+            // Check if this is a new user
+            let document = try? await db.collection(Constants.Firebase.usersCollection).document(firebaseUser.uid).getDocument()
+            let isNewUser = document == nil || !document!.exists
+            logger.info("User document exists: \(!isNewUser)")
+            
+            if isNewUser {
+                logger.info("Creating new user profile and documents")
+                // Get the additional user info from the auth result
+                if let additionalUserInfo = result.additionalUserInfo,
+                   let profile = additionalUserInfo.profile {
+                    // Try to get the name from the profile
+                    let givenName = (profile["given_name"] as? String) ?? "User"
+                    let familyName = (profile["family_name"] as? String) ?? ""
+                    logger.info("Creating user with name: \(givenName) \(familyName)")
+                    
+                    // Create new user with Apple data
+                    var userData = User(
+                        id: firebaseUser.uid,
+                        displayName: "\(givenName) \(familyName)".trimmingCharacters(in: .whitespaces),
+                        email: firebaseUser.email ?? "",
+                        dateOfBirth: Date(),
+                        firstName: givenName,
+                        lastName: familyName,
+                        phoneNumber: "",
+                        familyTreeID: nil,
+                        historyBookID: nil,
+                        parentIds: [],
+                        childrenIds: [],
+                        isAdmin: true,
+                        canAddMembers: true,
+                        canEdit: true,
+                        photoURL: nil,
+                        createdAt: Timestamp(),
+                        updatedAt: Timestamp()
+                    )
+                    
+                    // Create family tree and history book for new user
+                    let batch = db.batch()
+                    
+                    let userRef = db.collection(Constants.Firebase.usersCollection).document(firebaseUser.uid)
+                    let familyTreeID = db.collection(Constants.Firebase.familyTreesCollection).document().documentID
+                    let familyTreeRef = db.collection(Constants.Firebase.familyTreesCollection).document(familyTreeID)
+                    let historyBookID = db.collection(Constants.Firebase.historyBooksCollection).document().documentID
+                    let historyBookRef = db.collection(Constants.Firebase.historyBooksCollection).document(historyBookID)
+                    
+                    // Initialize family tree and history book
+                    let familyTree = FamilyTree(
+                        id: familyTreeID,
+                        ownerUserID: firebaseUser.uid,
+                        admins: [firebaseUser.uid],
+                        members: [firebaseUser.uid],
+                        name: "\(givenName)'s Family Tree",
+                        locked: false,
+                        createdAt: Timestamp(),
+                        updatedAt: Timestamp()
+                    )
+                    
+                    let historyBook = HistoryBook(
+                        id: historyBookID,
+                        ownerUserID: firebaseUser.uid,
+                        familyTreeID: familyTreeID,
+                        title: "\(givenName)'s History Book",
+                        privacy: .familyPublic
+                    )
+                    
+                    // Initialize family member
+                    let familyMember = FamilyMember(
+                        id: firebaseUser.uid,
+                        firstName: givenName,
+                        lastName: familyName,
+                        email: firebaseUser.email ?? "",
+                        dateOfBirth: Date(),
+                        isRegisteredUser: true,
+                        updatedAt: Timestamp()
+                    )
+                    
+                    // Update userData with IDs
+                    userData.familyTreeID = familyTreeID
+                    userData.historyBookID = historyBookID
+                    
+                    logger.info("Adding documents to batch")
+                    // Add operations to batch
+                    try batch.setData(from: userData, forDocument: userRef)
+                    try batch.setData(from: familyTree, forDocument: familyTreeRef)
+                    try batch.setData(from: historyBook, forDocument: historyBookRef)
+                    try batch.setData(from: familyMember, forDocument: familyTreeRef.collection(Constants.Firebase.membersSubcollection).document(firebaseUser.uid))
+                    
+                    logger.info("Committing batch")
+                    // Commit the batch
+                    try await batch.commit()
+                    logger.info("Batch committed successfully")
+                    
+                    // Save email for future sign-ins
+                    if let email = firebaseUser.email {
+                        UserDefaults.standard.set(email, forKey: "lastSignInEmail")
+                    }
+                    
+                    // Update local state immediately
+                    await MainActor.run {
+                        self.user = userData
+                        self.isAuthenticated = true
+                        self.authState = .authenticated
+                    }
+                    
+                    // Prompt for Face ID setup
+                    await promptForFaceIDSetup()
+                } else {
+                    logger.error("Failed to get user information from Apple Sign In")
+                    throw AuthError.signUpError("Failed to get user information from Apple")
+                }
+            } else {
+                logger.info("Loading existing user data")
+                // Load user data
+                await loadUserData(userId: firebaseUser.uid)
+                
+                // Existing user - check if Face ID is enabled and save email
+                if let email = firebaseUser.email {
+                    UserDefaults.standard.set(email, forKey: "lastSignInEmail")
+                }
+            }
+            
         } catch {
+            logger.error("Apple Sign In failed: \(error.localizedDescription)")
             throw mapFirebaseError(error)
+        }
+    }
+    
+    func revokeAppleToken(authorizationCode: String) async throws {
+        do {
+            try await Auth.auth().revokeToken(withAuthorizationCode: authorizationCode)
+        } catch {
+            logger.error("Failed to revoke Apple token: \(error.localizedDescription)")
+            throw AuthError.signOutError("Failed to revoke Apple token")
+        }
+    }
+    
+    func deleteAccount() async throws {
+        guard let currentUser = auth.currentUser else {
+            throw AuthError.userNotFound
+        }
+        
+        do {
+            // Delete user data from Firestore
+            let userId = currentUser.uid
+            let batch = db.batch()
+            
+            // Delete user document
+            let userRef = db.collection(Constants.Firebase.usersCollection).document(userId)
+            batch.deleteDocument(userRef)
+            
+            // Delete associated data (family tree, history book, etc.)
+            if let user = self.user {
+                if let familyTreeID = user.familyTreeID {
+                    let familyTreeRef = db.collection(Constants.Firebase.familyTreesCollection).document(familyTreeID)
+                    batch.deleteDocument(familyTreeRef)
+                }
+                
+                if let historyBookID = user.historyBookID {
+                    let historyBookRef = db.collection(Constants.Firebase.historyBooksCollection).document(historyBookID)
+                    batch.deleteDocument(historyBookRef)
+                }
+            }
+            
+            try await batch.commit()
+            
+            // Delete Firebase Auth user
+            try await currentUser.delete()
+            
+            // Update local state
+            self.user = nil
+            self.isAuthenticated = false
+            self.authState = .notAuthenticated
+            
+        } catch {
+            logger.error("Failed to delete account: \(error.localizedDescription)")
+            throw AuthError.signOutError("Failed to delete account")
         }
     }
     
@@ -342,5 +522,33 @@ class AuthManager: ObservableObject {
             
             try await db.collection(Constants.Firebase.usersCollection).document(currentUser.uid).updateData(updateData)
         }
+    }
+    
+    // MARK: - Face ID Handling
+    
+    private func promptForFaceIDSetup() async {
+        let context = LAContext()
+        var error: NSError?
+        
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            // Show Face ID setup alert
+            // Note: This should be handled in the UI layer, we'll need to add a published property
+            // to show the alert and handle the user's response
+            await MainActor.run {
+                self.shouldShowFaceIDSetupPrompt = true
+            }
+        }
+    }
+    
+    func enableFaceID() {
+        UserDefaults.standard.set(true, forKey: "isFaceIDEnabled")
+    }
+    
+    func isFaceIDEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: "isFaceIDEnabled")
+    }
+    
+    func getLastSignInEmail() -> String? {
+        UserDefaults.standard.string(forKey: "lastSignInEmail")
     }
 } 
