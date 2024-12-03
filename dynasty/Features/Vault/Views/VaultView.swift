@@ -407,12 +407,6 @@ struct VaultContentView: View {
 }
 
 // Placeholder Views
-struct DocumentsView: View {
-    var body: some View {
-        Text("Documents View")
-    }
-}
-
 struct PhotosView: View {
     var body: some View {
         Text("Photos View")
