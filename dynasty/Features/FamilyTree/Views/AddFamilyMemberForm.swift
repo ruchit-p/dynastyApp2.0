@@ -4,6 +4,7 @@ import FirebaseFirestore
 
 struct AddFamilyMemberForm: View {
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var familyTreeViewModel: FamilyTreeViewModel
 
     // MARK: - State Properties
     @State private var firstName: String = ""
@@ -24,6 +25,7 @@ struct AddFamilyMemberForm: View {
         self.selectedMember = selectedMember
         self.user = user
         self.familyTreeID = user.familyTreeID ?? ""
+        self._familyTreeViewModel = StateObject(wrappedValue: FamilyTreeViewModel(treeId: user.familyTreeID ?? "", userId: user.id!))
     }
 
     // MARK: - Body
@@ -86,7 +88,9 @@ struct AddFamilyMemberForm: View {
             // Add the new member and get the DocumentReference
             let newMemberRef = try await familyMembersRef.addDocument(from: newFamilyMember)
             // Use the document ID to add the relationship
-            await addRelationship(toMemberID: newMemberRef.documentID)
+            try await addRelationship(toMemberID: newMemberRef.documentID)
+            // Refresh the tree data
+            try await familyTreeViewModel.loadTreeData()
         } catch {
             print("Error adding family member: \(error.localizedDescription)")
         }

@@ -9,14 +9,14 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
 - **Project Name:** Dynasty  
 - **Purpose:** A family tree application for iOS that provides a secure platform for family members to connect, share stories, and maintain their legacy.  
 - **Key Features:**  
-  - User authentication with email/password and Apple Sign In
-  - Face ID/Touch ID support
+  - Robust user authentication with email/password and Apple Sign In
+  - Advanced biometric security with Face ID/Touch ID/Passcode fallback
+  - Secure vault with attempt limiting and lockout protection
   - Family tree visualization  
-  - Document vault  
   - Personal history book  
   - Family feed  
   - Encrypted messaging  
-- **Current Phase:** Development - Family Tree Implementation  
+- **Current Phase:** Development - Security Implementation & Family Tree  
 - **Project Owner/Stakeholders:** Just Me  
 
 ---
@@ -34,19 +34,29 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
    - Editing mode includes add buttons (+) for adding new members and a settings button for editing personal details.  
    - Add Family Member page includes fields: First name, Last name, DOB, Email, Phone number, Gender.  
 
-2. **Vault for Document Storage:**  
-   - Secure, end-to-end encrypted storage for pictures, documents, and videos.  
-   - Requires re-authentication with FaceID or phone password for access.  
+2. **Vault for Document Storage:** 🚧 IN PROGRESS
+   - Secure, end-to-end encrypted storage for pictures, documents, and videos
+   - Multi-layer authentication with biometrics and passcode fallback
+   - Attempt limiting with 5-minute lockout after 5 failed attempts
+   - Comprehensive security logging and monitoring
+   - Automatic session validation and token refresh
+   - Secure document deletion with confirmation
+   - Dynamic authentication UI based on device capabilities
 
 3. **User Authentication:** ✅ COMPLETED
-   - Firebase Authentication with email/password and Apple Sign-In
-   - Password reset option with email link functionality
-   - Secure Apple Sign-In with cryptographic nonce
+   - Firebase Authentication with email/password and Apple Sign In
+   - Robust error handling and user feedback
+   - Secure Apple Sign In with cryptographic nonce
    - Token revocation and account deletion support
    - Automatic user profile and family tree initialization
    - Face ID/Touch ID support for quick sign-in
-   - Email persistence for returning users
+   - Email persistence for password-based sign-ins only
    - Proper new user account creation flow
+   - Comprehensive logging for debugging and security auditing
+   - User-friendly error messages
+   - Graceful handling of authentication failures
+   - Session validation and token refresh
+   - Biometric availability checking
 
 4. **Feed for Family Updates:**  
    - Displays public history book stories.  
@@ -67,7 +77,20 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
   - Firebase Functions  
   - AuthenticationServices (Apple Sign-In)
   - CryptoKit (Secure Authentication)
-  - LocalAuthentication (Face ID/Touch ID)
+  - LocalAuthentication (Biometric Security)
+  - os.log (System Logging)
+
+- **Security Features:**
+  - Multi-factor authentication
+  - Biometric authentication with fallback
+  - Attempt limiting and lockout
+  - Session management
+  - Token refresh
+  - Comprehensive error handling
+  - Security state logging
+  - User session validation
+  - Secure credential storage
+  - Cryptographic nonce generation
 
 - **Infrastructure:**  
   - Firebase for backend services and hosting  
@@ -79,15 +102,21 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
 1. **Initiation Phase:** Complete ✅
 2. **Authentication Phase:** Complete ✅
    - Basic email/password authentication
-   - Apple Sign In integration
-   - Face ID/Touch ID support
+   - Apple Sign In integration with full name handling
+   - Biometric authentication integration
+   - Comprehensive error handling
+   - Security logging implementation
    - User profile creation
    - Family tree initialization
-3. **Current Sprint/Phase:** Family Tree Diagram Implementation
+3. **Current Sprint/Phase:** Security Implementation & Family Tree
+   - Implementing secure vault access
+   - Setting up biometric authentication with fallback
+   - Implementing attempt limiting
+   - Developing family tree visualization
 4. **Next Milestones:**  
+   - Complete vault security implementation
    - Implement interactive Family Tree canvas
    - Add member management functionality
-   - Implement Vault with re-authentication
    - Develop Feed system
    - Launch beta testing
 
@@ -97,37 +126,54 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
 
 ### Tasks Completed ✅
 - Firebase Authentication setup
-- Robust Apple Sign-In implementation with security best practices
+- Robust Apple Sign In implementation
 - Email/password authentication with error handling
 - User profile creation with family tree initialization
 - History book creation flow
 - Token revocation and account deletion functionality
-- Database structure in Firestore for user profiles and family connections
+- Database structure in Firestore
 - Face ID/Touch ID integration
-- Email persistence for returning users
+- Email persistence for password sign-ins
 - New user onboarding flow
+- Comprehensive error handling
+- Security logging system
+- Vault access control implementation
+- Attempt limiting system
+- Session validation
+- Token refresh mechanism
 
 ### Tasks in Progress 🚧
-- Family Tree Diagram interactive canvas development
+- Vault security features refinement
+- Family Tree Diagram interactive canvas
 - Member addition and editing functionality
 - Permission system implementation
 - Tree visualization components
 
-### Upcoming Tasks 📋
-- Vault implementation with Firebase Storage
-- Feed system development
-- RSVP and event functionality
-- Beta testing preparation
+### Security Improvements Made 🔒
+- Added biometric authentication with passcode fallback
+- Implemented comprehensive error handling
+- Added detailed security logging
+- Enhanced user feedback for authentication issues
+- Improved credential validation
+- Added session management
+- Implemented secure state handling
+- Added attempt limiting and lockout
+- Added token refresh mechanism
+- Added biometric availability checking
 
 ### Issues/Risks Identified
-- Ensuring seamless scalability of Firestore database as the family tree expands
-- Managing user permissions across branches effectively
-- Optimizing tree rendering performance for large families
+- Ensuring seamless scalability of Firestore database
+- Managing user permissions across branches
+- Optimizing tree rendering performance
 - Handling biometric authentication edge cases
+- Managing secure data synchronization
+- Handling offline security states
+- Managing authentication attempt limits
+- Handling device capability variations
 
 ### Next Steps (Immediate Focus)
-1. Implement Family Tree interactive canvas
-2. Create member addition/editing UI
+1. Complete vault security implementation
+2. Implement Family Tree interactive canvas
 3. Develop tree navigation controls
 4. Implement permission system
 5. Add member information display
@@ -136,13 +182,17 @@ Here is the entire Project Status Page: Dynasty in Markdown format:
 
 ## 6. Visual Workflows
 
-### Authentication Workflow (Current Implementation)
+### Authentication Workflow (Implemented ✅)
 ```plaintext
 User opens app
       ↓
 Choose Sign In Method
       ↓
 Email/Password or Apple Sign In
+      ↓
+Validate Credentials
+      ↓
+Handle Authentication Response
       ↓
 If new user → Create Profile
       ↓
@@ -151,6 +201,27 @@ Initialize Family Tree & History Book
 Prompt for Face ID Setup
       ↓
 Main App Interface
+```
+
+### Vault Access Workflow (Enhanced 🔒)
+```plaintext
+User attempts to access vault
+      ↓
+Check Biometric Availability
+      ↓
+Attempt Biometric Authentication
+      ↓
+If Failed → Fallback to Passcode
+      ↓
+Track Authentication Attempts
+      ↓
+If Too Many Failures → Lockout
+      ↓
+If Successful → Show Vault Content
+      ↓
+Monitor Session State
+      ↓
+Refresh Token as Needed
 ```
 
 ### Family Tree Diagram Workflow (Current Focus)
@@ -168,19 +239,6 @@ Tree Updates Dynamically
 View Member Details (Info Page)
       ↓
 Show History Book Entries
-```
-
-### Vault Access Workflow (Upcoming)
-```plaintext
-Navigate to Vault
-      ↓
-Authenticate with FaceID/Password
-      ↓
-Upload Document (File Picker)
-      ↓
-Save to Firebase Storage
-      ↓
-Retrieve Document (View/Download)
 ```
 
 ### Feed Functionality Workflow (Upcoming)
@@ -201,4 +259,5 @@ Save RSVP Status to Firestore
 ## 7. Goals and Vision
 
 - **End Goal:** To create a close-knit social media platform for family members to securely share their stories with their loved ones.
-- **Current Priority:** Delivering a smooth and intuitive family tree interaction experience with robust authentication.
+- **Current Priority:** Implementing robust security features while maintaining excellent user experience.
+- **Security Focus:** Ensuring user data protection through multi-layer authentication and secure storage.

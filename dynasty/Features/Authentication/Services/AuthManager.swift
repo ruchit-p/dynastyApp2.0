@@ -17,10 +17,14 @@ enum AuthError: Error {
     case wrongPassword
     case tooManyRequests
     case userDisabled
+    case biometricError(String)
+    case documentCreationFailed(String)
+    case databaseError(String)
     case unknown
     case invalidReferralCode
     case familyTreeCreationFailed
     case userDocumentCreationFailed
+    case notAuthenticated
     
     var description: String {
         switch self {
@@ -35,10 +39,14 @@ enum AuthError: Error {
         case .wrongPassword: return "Incorrect password"
         case .tooManyRequests: return "Too many attempts. Please try again later."
         case .userDisabled: return "This account has been disabled."
+        case .biometricError(let message): return "Biometric authentication failed: \(message)"
+        case .documentCreationFailed(let message): return "Failed to create document: \(message)"
+        case .databaseError(let message): return "Database error: \(message)"
         case .unknown: return "An unknown error occurred"
         case .invalidReferralCode: return "Invalid or expired referral code"
         case .familyTreeCreationFailed: return "Failed to create family tree"
         case .userDocumentCreationFailed: return "Failed to create user profile"
+        case .notAuthenticated: return "User is not authenticated"
         }
     }
 }
@@ -86,7 +94,7 @@ class AuthManager: ObservableObject {
             
             if let firebaseUser = firebaseUser {
                 Task {
-                    await self.loadUserData(userId: firebaseUser.uid)
+                    try await self.loadUserData(userId: firebaseUser.uid)
                 }
             } else {
                 Task { @MainActor in
@@ -98,7 +106,8 @@ class AuthManager: ObservableObject {
         }
     }
     
-    private func loadUserData(userId: String) async {
+    private func loadUserData(userId: String) async throws {
+        logger.info("Loading user data for userId: \(userId)")
         do {
             let document = try await db.collection(Constants.Firebase.usersCollection).document(userId).getDocument()
             
@@ -109,15 +118,22 @@ class AuthManager: ObservableObject {
                     self.isAuthenticated = false
                     self.authState = .notAuthenticated
                 }
-                return
+                throw AuthError.userNotFound
             }
             
-            let userData = try document.data(as: User.self)
-            
-            await MainActor.run {
-                self.user = userData
-                self.isAuthenticated = true
-                self.authState = .authenticated
+            do {
+                let userData = try document.data(as: User.self)
+                logger.info("Successfully decoded user data")
+                
+                await MainActor.run {
+                    self.user = userData
+                    self.isAuthenticated = true
+                    self.authState = .authenticated
+                    logger.info("Updated auth state: authenticated")
+                }
+            } catch {
+                logger.error("Failed to decode user data: \(error.localizedDescription)")
+                throw AuthError.documentCreationFailed("Failed to decode user data")
             }
         } catch {
             logger.error("Failed to load user data: \(error.localizedDescription)")
@@ -126,10 +142,11 @@ class AuthManager: ObservableObject {
                 self.isAuthenticated = false
                 self.authState = .notAuthenticated
             }
+            throw AuthError.databaseError("Failed to load user data")
         }
     }
     
-    private func removeAuthStateListener() {
+    private func removeAuthStateListener() throws {
         if let handle = authStateListener {
             auth.removeStateDidChangeListener(handle)
         }
@@ -137,10 +154,14 @@ class AuthManager: ObservableObject {
     
     // MARK: - Authentication Methods
     func signIn(email: String, password: String) async throws {
+        logger.info("Attempting sign in with email")
         do {
             let result = try await auth.signIn(withEmail: email, password: password)
-            await loadUserData(userId: result.user.uid)
+            logger.info("Email sign in successful")
+            UserDefaults.standard.set(email, forKey: "lastSignInEmail")
+            try await loadUserData(userId: result.user.uid)
         } catch {
+            logger.error("Sign in failed: \(error.localizedDescription)")
             throw mapFirebaseError(error)
         }
     }
@@ -252,13 +273,18 @@ class AuthManager: ObservableObject {
     }
     
     func signOut() throws {
+        logger.info("Attempting sign out")
         do {
             try Auth.auth().signOut()
+            UserDefaults.standard.removeObject(forKey: "lastSignInEmail")
+            logger.info("Cleared last sign in email")
+            
             self.isAuthenticated = false
             self.user = nil
             self.authState = .notAuthenticated
+            logger.info("Sign out successful")
         } catch {
-            logger.error("Sign-out failed: \(error.localizedDescription)")
+            logger.error("Sign out failed: \(error.localizedDescription)")
             throw AuthError.signOutError(error.localizedDescription)
         }
     }
@@ -392,7 +418,7 @@ class AuthManager: ObservableObject {
             } else {
                 logger.info("Loading existing user data")
                 // Load user data
-                await loadUserData(userId: firebaseUser.uid)
+                try await loadUserData(userId: firebaseUser.uid)
                 
                 // Existing user - check if Face ID is enabled and save email
                 if let email = firebaseUser.email {
@@ -460,6 +486,7 @@ class AuthManager: ObservableObject {
     
     // MARK: - Helper Methods
     private func mapFirebaseError(_ error: Error) -> AuthError {
+        logger.error("Mapping Firebase error: \(error.localizedDescription)")
         let authError = error as NSError
         
         if let code = AuthErrorCode(rawValue: authError.code) {
@@ -481,9 +508,11 @@ class AuthManager: ObservableObject {
             case .userDisabled:
                 return .userDisabled
             default:
+                logger.error("Unhandled Firebase error code: \(code.rawValue)")
                 return .unknown
             }
         } else {
+            logger.error("Unknown error type: \(authError.localizedDescription)")
             return .unknown
         }
     }
@@ -550,5 +579,55 @@ class AuthManager: ObservableObject {
     
     func getLastSignInEmail() -> String? {
         UserDefaults.standard.string(forKey: "lastSignInEmail")
+    }
+    
+    // Add method to check biometric availability
+    func checkBiometricAvailability() -> (available: Bool, type: LABiometryType, error: String?) {
+        let context = LAContext()
+        var error: NSError?
+        
+        let available = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
+        logger.info("Biometric availability check - Available: \(available), Type: \(context.biometryType.rawValue)")
+        
+        if let error = error {
+            logger.error("Biometric availability check failed: \(error.localizedDescription)")
+            return (false, .none, error.localizedDescription)
+        }
+        
+        return (available, context.biometryType, nil)
+    }
+    
+    // Add method to validate user session
+    func validateSession() async throws {
+        guard let currentUser = auth.currentUser else {
+            logger.error("No current user found during session validation")
+            throw AuthError.notAuthenticated
+        }
+        
+        do {
+            try await loadUserData(userId: currentUser.uid)
+            logger.info("Session validation successful")
+        } catch let error {
+            logger.error("Session validation failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    // Add method to handle token refresh
+    func refreshUserToken() async throws {
+        logger.info("Attempting to refresh user token")
+        guard let currentUser = auth.currentUser else {
+            logger.error("No current user found for token refresh")
+            throw AuthError.userNotFound
+        }
+        
+        do {
+            let token = try await currentUser.getIDToken()
+            logger.info("Token refresh successful")
+            UserDefaults.standard.set(token, forKey: "userToken")
+        } catch {
+            logger.error("Token refresh failed: \(error.localizedDescription)")
+            throw AuthError.signInError("Failed to refresh authentication token")
+        }
     }
 } 

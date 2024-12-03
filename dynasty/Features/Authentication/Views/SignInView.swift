@@ -166,21 +166,56 @@ struct SignInView: View {
         switch result {
         case .success(let authResults):
             logger.info("Apple Sign In authorization successful")
-            guard let appleIDCredential = authResults.credential as? ASAuthorizationAppleIDCredential,
-                  let nonce = currentNonce,
-                  let appleIDToken = appleIDCredential.identityToken,
-                  let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
-                logger.error("Failed to get required credentials from Apple Sign In")
-                errorMessage = "Failed to get required credentials"
+            
+            // Validate Apple ID Credential
+            guard let appleIDCredential = authResults.credential as? ASAuthorizationAppleIDCredential else {
+                logger.error("Failed to get Apple ID credential")
+                errorMessage = "Unable to access Apple ID credentials"
+                return
+            }
+            
+            // Validate nonce
+            guard let nonce = currentNonce else {
+                logger.error("Invalid state: Missing nonce")
+                errorMessage = "An error occurred during authentication"
+                return
+            }
+            
+            // Validate identity token
+            guard let appleIDToken = appleIDCredential.identityToken else {
+                logger.error("Failed to get identity token")
+                errorMessage = "Unable to verify identity with Apple"
+                return
+            }
+            
+            // Convert token to string
+            guard let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+                logger.error("Failed to convert identity token to string")
+                errorMessage = "Unable to process authentication data"
                 return
             }
             
             logger.info("Got Apple ID credentials, creating Firebase credential")
+            
+            // Log user information (safely)
+            if let email = appleIDCredential.email {
+                logger.info("User email provided: \(email)")
+            } else {
+                logger.info("No email provided (might be private relay)")
+            }
+            
+            if let fullName = appleIDCredential.fullName {
+                logger.info("User name provided: \(fullName.givenName ?? "") \(fullName.familyName ?? "")")
+            } else {
+                logger.info("No name information provided")
+            }
+            
             // Create the Firebase credential
             let credential = OAuthProvider.credential(
-                withProviderID: "apple.com",
+                providerID: AuthProviderID.apple,
                 idToken: idTokenString,
-                rawNonce: nonce
+                rawNonce: nonce,
+                accessToken: nil
             )
             
             Task {
@@ -188,15 +223,56 @@ struct SignInView: View {
                     logger.info("Attempting to sign in with Apple credential")
                     try await authManager.signInWithApple(credential: credential)
                     logger.info("Apple Sign In successful")
+                    
+                    // Check if this was first time sign in
+                    if appleIDCredential.email != nil {
+                        logger.info("First time Apple Sign In detected")
+                        // Show Face ID setup prompt if needed
+                        if !authManager.isFaceIDEnabled() {
+                            showingFaceIDSetup = true
+                        }
+                    }
+                    
+                } catch let error as AuthError {
+                    logger.error("Apple Sign In failed with AuthError: \(error.description)")
+                    errorMessage = error.description
                 } catch {
-                    logger.error("Apple Sign In failed: \(error.localizedDescription)")
-                    errorMessage = error.localizedDescription
+                    logger.error("Apple Sign In failed with unexpected error: \(error.localizedDescription)")
+                    errorMessage = "An unexpected error occurred during sign in"
                 }
             }
             
+        case .failure(let error as ASAuthorizationError):
+            // Handle ASAuthorizationError specifically
+            switch error.code {
+            case .canceled:
+                logger.info("User cancelled Apple Sign In")
+                errorMessage = "Sign in was cancelled"
+            case .invalidResponse:
+                logger.error("Invalid response during Apple Sign In")
+                errorMessage = "Invalid response received"
+            case .failed:
+                logger.error("Apple Sign In failed")
+                errorMessage = "Sign in failed"
+            case .notHandled:
+                logger.error("Apple Sign In not handled")
+                errorMessage = "Sign in request not handled"
+            case .unknown:
+                logger.error("Unknown Apple Sign In error")
+                errorMessage = "An unknown error occurred"
+            case .notInteractive:
+                logger.error("Sign in requires user interaction")
+                errorMessage = "Sign in requires user interaction"
+            case .matchedExcludedCredential:
+                logger.error("Credential matches an excluded one")
+                errorMessage = "This credential cannot be used"
+            @unknown default:
+                logger.error("Unexpected Apple Sign In error: \(error.localizedDescription)")
+                errorMessage = "An unexpected error occurred"
+            }
         case .failure(let error):
-            logger.error("Apple Sign In authorization failed: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
+            logger.error("Apple Sign In failed with error: \(error.localizedDescription)")
+            errorMessage = "Sign in failed: \(error.localizedDescription)"
         }
     }
     

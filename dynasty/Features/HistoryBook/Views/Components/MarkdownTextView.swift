@@ -132,8 +132,16 @@ struct MarkdownTextView: UIViewRepresentable {
     }
 
     // Helper to get the UITextView
+    private func findKeyWindow() -> UIWindow? {
+        if let windowScene = UIApplication.shared.connectedScenes
+            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+            return windowScene.windows.first(where: { $0.isKeyWindow })
+        }
+        return nil
+    }
+    
     func getTextView() -> UITextView? {
-        UIApplication.shared.windows.first { $0.isKeyWindow }?.rootViewController?.view.findTextView()
+        findKeyWindow()?.rootViewController?.view.findTextView()
     }
 }
 

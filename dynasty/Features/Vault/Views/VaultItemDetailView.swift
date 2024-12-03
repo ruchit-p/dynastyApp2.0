@@ -7,15 +7,15 @@ import FirebaseFirestore
 
 struct VaultItemDetailView: View {
     let vaultItem: VaultItem
-    @State private var decryptedData: String?
+    @State private var decryptedContent: String?
     @State private var showError: Bool = false
 
     var body: some View {
         VStack {
-            if let decryptedData = decryptedData {
+            if let decryptedContent = decryptedContent {
                 Text("Content:")
                     .font(.headline)
-                Text(decryptedData)
+                Text(decryptedContent)
                     .padding()
             } else {
                 Text("Unlock to view the content.")
@@ -76,23 +76,22 @@ struct VaultItemDetailView: View {
             let status = SecItemCopyMatching(query as CFDictionary, &result)
             
             guard status == errSecSuccess,
-                  let keyData = result as? Data,
-                  let key = try? SymmetricKey(data: keyData) else {
-                print("Error retrieving encryption key from Keychain")
-                return
+                  let keyData = result as? Data else {
+                throw VaultError.keyRetrievalError
             }
+            
+            // Create symmetric key and decrypt
+            let key = try SymmetricKey(data: keyData)
             
             // Convert base64 encrypted content to Data
             guard let encryptedData = Data(base64Encoded: vaultItem.encryptedContent) else {
-                print("Error decoding base64 encrypted content")
-                return
+                throw VaultError.invalidEncryptedData
             }
             
             // Split the encrypted data into nonce and sealed box
             let nonceSize = 12  // AES-GCM uses a 12-byte nonce
             guard encryptedData.count > nonceSize else {
-                print("Encrypted data is invalid")
-                return
+                throw VaultError.invalidEncryptedData
             }
             
             let nonce = try AES.GCM.Nonce(data: encryptedData.prefix(nonceSize))
@@ -107,17 +106,27 @@ struct VaultItemDetailView: View {
             
             // Convert decrypted data to string
             guard let decryptedString = String(data: decryptedData, encoding: .utf8) else {
-                print("Error converting decrypted data to string")
-                return
+                throw VaultError.decodingError
             }
             
-            self.decryptedData = decryptedString
+            DispatchQueue.main.async {
+                self.decryptedContent = decryptedString
+            }
             
         } catch {
             print("Decryption error: \(error.localizedDescription)")
-            showError = true
+            DispatchQueue.main.async {
+                self.showError = true
+            }
         }
     }
+}
+
+// Vault error enum
+enum VaultError: Error {
+    case keyRetrievalError
+    case invalidEncryptedData
+    case decodingError
 }
 
 // Vault item model

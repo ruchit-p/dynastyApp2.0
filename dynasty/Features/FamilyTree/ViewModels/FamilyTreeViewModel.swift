@@ -71,6 +71,7 @@ class FamilyTreeViewModel: ObservableObject {
             .document(member.id)
         
         try await memberRef.setData(from: member)
+        try await loadTreeData()
     }
     
     func deleteMember(_ memberId: String) async throws {
@@ -78,52 +79,11 @@ class FamilyTreeViewModel: ObservableObject {
         let batch = db.batch()
         
         if let member = nodes[memberId] {
-            // Remove from parents' children
-            for parentId in member.parentIds {
-                if var parent = nodes[parentId] {
-                    parent.childrenIds.removeAll { $0 == memberId }
-                    let parentRef = db.collection("familyTrees")
-                        .document(treeId)
-                        .collection("members")
-                        .document(parentId)
-                    try batch.setData(from: parent, forDocument: parentRef)
-                }
-            }
-            
-            // Remove from spouse's spouses
-            for spouseId in member.spouseIds {
-                if var spouse = nodes[spouseId] {
-                    spouse.spouseIds.removeAll { $0 == memberId }
-                    let spouseRef = db.collection("familyTrees")
-                        .document(treeId)
-                        .collection("members")
-                        .document(spouseId)
-                    try batch.setData(from: spouse, forDocument: spouseRef)
-                }
-            }
-            
-            // Remove from children's parents
-            for childId in member.childrenIds {
-                if var child = nodes[childId] {
-                    child.parentIds.removeAll { $0 == memberId }
-                    let childRef = db.collection("familyTrees")
-                        .document(treeId)
-                        .collection("members")
-                        .document(childId)
-                    try batch.setData(from: child, forDocument: childRef)
-                }
-            }
+            // Remove member and update relationships
+            try await updateRelationships(for: member, batch: batch)
+            try await batch.commit()
+            try await loadTreeData()
         }
-        
-        // Delete the member
-        let memberRef = db.collection("familyTrees")
-            .document(treeId)
-            .collection("members")
-            .document(memberId)
-        batch.deleteDocument(memberRef)
-        
-        // Commit all changes
-        try await batch.commit()
     }
     
     // MARK: - Relationship Operations
@@ -178,6 +138,74 @@ class FamilyTreeViewModel: ObservableObject {
         }
         
         try await batch.commit()
+    }
+    
+    // MARK: - Data Loading
+    
+    func loadTreeData() async throws {
+        isLoading = true
+        defer { isLoading = false }
+        
+        let snapshot = try await db.collection("familyTrees")
+            .document(treeId)
+            .collection("members")
+            .getDocuments()
+        
+        var updatedNodes: [String: FamilyTreeNode] = [:]
+        for document in snapshot.documents {
+            if let node = try? document.data(as: FamilyTreeNode.self) {
+                updatedNodes[node.id] = node
+            }
+        }
+        
+        await MainActor.run {
+            self.nodes = updatedNodes
+        }
+    }
+    
+    private func updateRelationships(for member: FamilyTreeNode, batch: WriteBatch) async throws {
+        // Remove from parents' children
+        for parentId in member.parentIds {
+            if var parent = nodes[parentId] {
+                parent.childrenIds.removeAll { $0 == member.id }
+                let parentRef = db.collection("familyTrees")
+                    .document(treeId)
+                    .collection("members")
+                    .document(parentId)
+                try batch.setData(from: parent, forDocument: parentRef)
+            }
+        }
+        
+        // Remove from spouse's spouses
+        for spouseId in member.spouseIds {
+            if var spouse = nodes[spouseId] {
+                spouse.spouseIds.removeAll { $0 == member.id }
+                let spouseRef = db.collection("familyTrees")
+                    .document(treeId)
+                    .collection("members")
+                    .document(spouseId)
+                try batch.setData(from: spouse, forDocument: spouseRef)
+            }
+        }
+        
+        // Remove from children's parents
+        for childId in member.childrenIds {
+            if var child = nodes[childId] {
+                child.parentIds.removeAll { $0 == member.id }
+                let childRef = db.collection("familyTrees")
+                    .document(treeId)
+                    .collection("members")
+                    .document(childId)
+                try batch.setData(from: child, forDocument: childRef)
+            }
+        }
+        
+        // Delete the member
+        let memberRef = db.collection("familyTrees")
+            .document(treeId)
+            .collection("members")
+            .document(member.id)
+        batch.deleteDocument(memberRef)
     }
     
     // MARK: - Helper Methods

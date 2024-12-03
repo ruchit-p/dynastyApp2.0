@@ -88,7 +88,7 @@ struct HistoryBookView: View {
             .onAppear {
                 fetchHistoryBook()
             }
-            .onChange(of: showAddStoryView) { newValue in
+            .onChange(of: showAddStoryView) { oldValue, newValue in
                 if !newValue {
                     if let historyBookID = historyBook?.id {
                         fetchStories(historyBookID: historyBookID)
