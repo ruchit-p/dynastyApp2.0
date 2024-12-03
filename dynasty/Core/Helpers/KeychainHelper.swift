@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import CryptoKit
 
 class KeychainHelper {
     static let shared = KeychainHelper()
@@ -63,5 +64,91 @@ class KeychainHelper {
             }
         }
         return success
+    }
+    
+    func loadEncryptionKeys() throws -> [String: SymmetricKey] {
+        var keys: [String: SymmetricKey] = [:]
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.dynasty.vault.keys",
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: true
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        if status == errSecSuccess {
+            if let items = result as? [[String: Any]] {
+                for item in items {
+                    if let keyData = item[kSecValueData as String] as? Data,
+                       let keyId = item[kSecAttrAccount as String] as? String {
+                        keys[keyId] = SymmetricKey(data: keyData)
+                    }
+                }
+            }
+        } else if status != errSecItemNotFound {
+            throw KeychainError.unhandledError(status: status)
+        }
+        
+        return keys
+    }
+    
+    func loadEncryptionKey(for keyId: String) throws -> SymmetricKey {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.dynasty.vault.keys",
+            kSecAttrAccount as String: keyId,
+            kSecReturnData as String: true
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        guard status == errSecSuccess,
+              let keyData = result as? Data else {
+            throw KeychainError.itemNotFound
+        }
+        
+        return SymmetricKey(data: keyData)
+    }
+    
+    func storeEncryptionKey(_ key: SymmetricKey, for keyId: String) throws {
+        let keyData = key.withUnsafeBytes { Data($0) }
+        
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.dynasty.vault.keys",
+            kSecAttrAccount as String: keyId,
+            kSecValueData as String: keyData
+        ]
+        
+        let status = SecItemAdd(query as CFDictionary, nil)
+        
+        if status != errSecSuccess {
+            throw KeychainError.unhandledError(status: status)
+        }
+    }
+    
+    func deleteEncryptionKey(for keyId: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.dynasty.vault.keys",
+            kSecAttrAccount as String: keyId
+        ]
+        
+        let status = SecItemDelete(query as CFDictionary)
+        
+        if status != errSecSuccess && status != errSecItemNotFound {
+            throw KeychainError.unhandledError(status: status)
+        }
+    }
+    
+    enum KeychainError: Error {
+        case itemNotFound
+        case duplicateItem
+        case invalidItemFormat
+        case unhandledError(status: OSStatus)
     }
 } 

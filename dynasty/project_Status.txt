@@ -1,309 +1,124 @@
-# Project Status Page: Dynasty
+# Dynasty App 2.0 Project Status
 
----
+## Completed Features
 
-## 1. Project Overview
+### Authentication
+- [x] User sign in with email/password
+- [x] User sign up with email/password
+- [x] Password reset functionality
+- [x] Email verification
+- [x] Biometric authentication (Face ID/Touch ID)
+- [x] Session management
+- [x] Error handling and validation
 
-- **Project Name:** Dynasty  
-- **Purpose:** A family tree application for iOS that provides a secure platform for family members to connect, share stories, and maintain their legacy.  
-- **Key Features:**  
-  - Robust user authentication with email/password and Apple Sign In ✅
-  - Advanced biometric security with Face ID/Touch ID/Passcode fallback ✅
-  - Secure vault with attempt limiting and lockout protection ✅
-  - Family tree visualization  
-  - Personal history book  
-  - Family feed  
-  - Encrypted messaging  
-- **Current Phase:** Development - Vault Implementation & Family Tree  
-- **Project Owner/Stakeholders:** Just Me  
+### Vault
+- [x] Secure vault implementation
+- [x] Biometric authentication for vault access
+- [x] Document encryption/decryption
+- [x] SQLite database for vault items
+- [x] Memory optimization for database operations
+- [x] Document upload functionality
+- [x] Document download functionality
+- [x] Document deletion
+- [x] Auto-lock functionality
+- [x] Document picker integration
+- [x] Progress tracking for uploads/downloads
+- [x] Error handling and logging
+- [x] Memory management improvements
+- [x] Transaction support for database operations
+- [x] Security-scoped resource handling
+- [x] Pull-to-refresh functionality
+- [x] Proper state management
+- [x] File cleanup and temporary storage handling
 
----
+### UI/UX
+- [x] Modern SwiftUI interface
+- [x] Grid layout for documents
+- [x] Loading states and progress indicators
+- [x] Error alerts and user feedback
+- [x] Document details view
+- [x] Pull-to-refresh functionality
+- [x] Empty state handling
+- [x] Navigation improvements
 
-## 2. Requirements
+## In Progress
 
-### Functional Requirements
+### Vault
+- [ ] Thumbnail generation for documents
+- [ ] Search functionality
+- [ ] Sort and filter options
+- [ ] Share functionality
+- [ ] Batch operations (delete, move, etc.)
+- [ ] Categories/folders for organization
+- [ ] Document preview functionality
+- [ ] Document metadata editing
+- [ ] Export functionality
+- [ ] Import from other apps
 
-1. **Family Tree Diagram:**  
-   - Interactive canvas, draggable for easy navigation.  
-   - Users can add family members (spouse, parents, children).  
-   - Family admins can edit the entire tree, while other members can only modify their branch.  
-   - Toggle between editing and viewing modes.  
-   - Tap on a user's icon to display an information button ("i"), leading to their personal history page.  
-   - Editing mode includes add buttons (+) for adding new members and a settings button for editing personal details.  
-   - Add Family Member page includes fields: First name, Last name, DOB, Email, Phone number, Gender.  
+### UI/UX
+- [ ] Dark mode support
+- [ ] Accessibility improvements
+- [ ] Localization
+- [ ] Custom animations and transitions
+- [ ] Context menus
+- [ ] Drag and drop support
 
-2. **Vault for Document Storage:** 🚧 IN PROGRESS
-   - Secure, end-to-end encrypted storage for pictures, documents, and videos ✅
-   - Multi-layer authentication with biometrics and passcode fallback ✅
-   - Attempt limiting with 5-minute lockout after 5 failed attempts ✅
-   - Comprehensive security logging and monitoring ✅
-   - Automatic session validation and token refresh ✅
-   - Secure document deletion with confirmation ✅
-   - Dynamic authentication UI based on device capabilities ✅
-   - Thumbnail generation and caching for files ✅
-   - Progress tracking for large file uploads/downloads ✅
-   - File type validation and preview functionality ✅
-   - Secure file sharing functionality 🚧
+## Planned Features
 
-3. **User Authentication:** ✅ COMPLETED
-   - Firebase Authentication with email/password and Apple Sign In
-   - Robust error handling and user feedback
-   - Secure Apple Sign In with cryptographic nonce
-   - Token revocation and account deletion support
-   - Automatic user profile and family tree initialization
-   - Face ID/Touch ID support for quick sign-in
-   - Email persistence for password-based sign-ins only
-   - Proper new user account creation flow
-   - Comprehensive logging for debugging and security auditing
-   - User-friendly error messages
-   - Graceful handling of authentication failures
-   - Session validation and token refresh
-   - Biometric availability checking
+### Vault
+- [ ] Cloud backup integration
+- [ ] Sync across devices
+- [ ] Version history
+- [ ] Conflict resolution
+- [ ] Advanced search (OCR, metadata)
+- [ ] Tags and metadata
+- [ ] Collaboration features
+- [ ] Document scanning
+- [ ] Password protection for individual items
+- [ ] Secure notes
 
-4. **Feed for Family Updates:**  
-   - Displays public history book stories.  
-   - Users can post RSVPs for events and invite specific family members or the entire family tree.  
+### Security
+- [ ] Two-factor authentication
+- [ ] Audit logging
+- [ ] Remote wipe
+- [ ] Secure sharing
+- [ ] Encryption key rotation
+- [ ] Security policy management
 
----
+### UI/UX
+- [ ] Customizable themes
+- [ ] Widget support
+- [ ] Quick actions
+- [ ] Spotlight integration
+- [ ] Handoff support
 
-## 3. Development Outline
+## Known Issues
+1. Memory management during large file operations needs optimization
+2. UI responsiveness during heavy database operations
+3. Need better error messages for user feedback
+4. Authentication state management needs improvement
+5. Document picker state management needs refinement
 
-- **Current Development Focus:**
-  - Implementing secure file sharing in vault
-  - Finalizing vault UI components
-  - Testing vault security features
-  - Preparing for family tree implementation
-  
-- **Technologies Used:**  
-  - Swift  
-  - Firebase  
+## Recent Improvements
+1. Fixed SQLite "out of memory" errors with better database configuration
+2. Improved Face ID authentication triggering
+3. Added proper memory management with autoreleasepools
+4. Added transaction support for database operations
+5. Improved security-scoped resource handling
+6. Fixed document download functionality
+7. Improved pull-to-refresh behavior
+8. Added better state management for vault locking
+9. Improved error handling and logging
+10. Added proper cleanup of temporary files
 
-- **Libraries/Frameworks:**  
-  - Firebase Authentication  
-  - Firebase Firestore  
-  - Firebase Storage  
-  - Firebase Functions  
-  - AuthenticationServices (Apple Sign-In)
-  - CryptoKit (File Encryption)
-  - LocalAuthentication (Biometric Security)
-  - os.log (System Logging)
-  - QuickLook (File Preview)
-  - AVKit (Audio/Video Playback)
-
-- **Security Features:**
-  - Multi-factor authentication ✅
-  - Biometric authentication with fallback ✅
-  - End-to-end file encryption ✅
-  - Secure file storage and retrieval ✅
-  - User-specific encryption keys ✅
-  - File access control ✅
-  - Secure key storage in Keychain ✅
-  - File integrity verification ✅
-
----
-
-## 4. Milestones
-
-1. **Initiation Phase:** Complete ✅
-2. **Authentication Phase:** Complete ✅
-3. **Current Sprint/Phase:** Vault Implementation
-   - Core vault functionality complete ✅
-   - End-to-end encryption implemented ✅
-   - File upload/download system complete ✅
-   - File access control implemented ✅
-   - Thumbnail generation and caching complete ✅
-   - File preview functionality complete ✅
-   - Remaining: File sharing functionality 🚧
-4. **Next Phase:** Family Tree Development
-   - Interactive canvas implementation
-   - Member management functionality
-   - Tree visualization
-   - Permission system
-5. **Future Phases:**
-   - Feed system development
-   - Beta testing
-   - Performance optimization
-
----
-
-## 5. Progress Tracking
-
-### Tasks Completed ✅
-- Firebase Authentication setup
-- Robust Apple Sign In implementation
-- Email/password authentication with error handling
-- User profile creation with family tree initialization
-- History book creation flow
-- Token revocation and account deletion functionality
-- Database structure in Firestore
-- Face ID/Touch ID integration
-- Email persistence for password sign-ins
-- New user onboarding flow
-- Comprehensive error handling
-- Security logging system
-- Vault access control implementation
-- Attempt limiting system
-- Session validation
-- Token refresh mechanism
-- Auto-lock functionality for vault
-- SQLite database integrity protection
-- Tab-based authentication tracking
-- Secure cache management
-- End-to-end file encryption
-- Secure file upload/download
-- File integrity verification
-- Thumbnail generation and caching
-- File preview functionality
-- Progress tracking for file operations
-
-### Immediate Focus (Vault Completion)
-1. Implement file sharing functionality
-2. Add sharing permissions management
-3. Implement shared file access control
-4. Add file version history
-5. Implement file recovery system
-6. Add batch operations support
-7. Optimize large file handling
-
-### Next Focus (Family Tree)
-1. Design interactive canvas
-2. Implement member management
-3. Create tree visualization
-4. Set up permission system
-5. Add member information display
-
-### Tasks in Progress 🚧
-- File sharing functionality
-- Sharing permissions system
-- File version history
-- File recovery system
-
-### Upcoming Tasks
-- Family Tree canvas development
-- Member management system
-- Tree visualization components
-- Permission system implementation
-
-### Security Improvements
-- Implement secure file sharing
-- Add file version control
-- Enhance file recovery security
-- Implement sharing permissions
-
-### Issues/Risks Identified
-- Ensuring seamless scalability of Firestore database
-- Managing user permissions across branches
-- Optimizing tree rendering performance
-- Handling biometric authentication edge cases
-- Managing secure data synchronization
-- Handling offline security states
-- Managing authentication attempt limits
-- Handling device capability variations
-- Large file upload/download optimization
-- Secure file sharing implementation
-
-### Next Steps (Immediate Focus)
-1. Complete file sharing functionality
-2. Implement sharing permissions
-3. Add file version history
-4. Create file recovery system
-5. Optimize large file handling
-
-### Technical Requirements for File Sharing
-
-#### Sharing System
-- Secure link generation
-- Access control management
-- Permission levels
-- Expiration settings
-- Revocation capability
-
-#### Version Control
-- File versioning
-- Change tracking
-- Rollback capability
-- Version comparison
-
-#### Recovery System
-- Soft delete implementation
-- Recovery window
-- Permanent deletion
-- Batch recovery
-
-### File Sharing Workflow
-```plaintext
-User selects file to share
-      ↓
-Configure sharing settings
-      ↓
-Generate secure share link
-      ↓
-Set permissions and expiry
-      ↓
-Send share invitation
-      ↓
-Track access and changes
-      ↓
-Manage shared access
-      ↓
-Enable revocation
-```
-
-## 6. Next Steps
-
-### Immediate Actions (File Sharing)
-1. Design sharing UI
-2. Implement share link generation
-3. Create permissions system
-4. Add version control
-5. Implement recovery system
-6. Add batch operations
-7. Test security measures
-
-### Following Phase (Family Tree)
-1. Design tree canvas layout
-2. Create member management system
-3. Implement visualization components
-4. Set up permission controls
-5. Add member data handling
-
-## 7. Goals and Vision
-
-- **Current Priority:** Completing vault functionality with secure file sharing
-- **Next Priority:** Developing interactive family tree functionality
-- **Long-term Vision:** Creating a comprehensive family history platform with secure document storage and sharing
-
-## 8. Technical Context & Implementation Notes
-
-### Vault Implementation
-- End-to-end encryption using CryptoKit ✅
-- Secure key storage in Keychain ✅
-- File integrity verification with SHA-256 ✅
-- Thumbnail generation and caching ✅
-- Progress tracking for file operations ✅
-- File preview support for multiple formats ✅
-
-### Security Decisions
-- End-to-end encryption for all files ✅
-- No server-side file processing ✅
-- Secure key storage in Keychain ✅
-- Automatic file cleanup after viewing ✅
-- Local thumbnail generation ✅
-- Secure file deletion ✅
-
-### Performance Considerations
-- Large file handling with chunked upload
-- Background upload support
-- Local caching strategy
-- Thumbnail generation optimizations
-- Memory management for large files
-
-### Future Considerations
-- Backup key recovery system
-- Family sharing capabilities
-- Version control for documents
-- Collaborative document editing
-- Cross-device synchronization
-- Offline access capabilities
-
-This section will be updated as new technical decisions and implementation details are finalized.
+## Next Steps
+1. Implement thumbnail generation with proper caching
+2. Add search functionality
+3. Improve document preview capabilities
+4. Add sort and filter options
+5. Implement batch operations
+6. Add categories/folders
+7. Improve error handling and user feedback
+8. Add document metadata editing
+9. Implement share functionality
+10. Add export/import capabilities

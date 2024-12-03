@@ -1,5 +1,46 @@
 import Foundation
-import FirebaseFirestore
+
+enum VaultItemType: String, Codable {
+    case document
+    case image
+    case video
+    case audio
+    
+    var maxFileSize: Int64 {
+        switch self {
+        case .document:
+            return 50 * 1024 * 1024  // 50MB
+        case .image:
+            return 20 * 1024 * 1024  // 20MB
+        case .video:
+            return 500 * 1024 * 1024 // 500MB
+        case .audio:
+            return 100 * 1024 * 1024 // 100MB
+        }
+    }
+    
+    var allowedMimeTypes: [String] {
+        switch self {
+        case .document:
+            return ["application/pdf", "text/plain", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+        case .image:
+            return ["image/jpeg", "image/png", "image/heic"]
+        case .video:
+            return ["video/mp4", "video/quicktime"]
+        case .audio:
+            return ["audio/mpeg", "audio/mp4", "audio/x-m4a"]
+        }
+    }
+}
+
+struct VaultItemMetadata: Codable {
+    let originalFileName: String
+    let fileSize: Int64
+    let mimeType: String
+    let encryptionKeyId: String
+    let iv: Data
+    let hash: String
+}
 
 struct VaultItem: Identifiable, Codable {
     let id: String
@@ -12,48 +53,4 @@ struct VaultItem: Identifiable, Codable {
     let metadata: VaultItemMetadata
     let createdAt: Date
     let updatedAt: Date
-    
-    var isEncrypted: Bool = true
-}
-
-struct VaultItemMetadata: Codable {
-    let originalFileName: String
-    let fileSize: Int64
-    let mimeType: String
-    let encryptionKeyId: String // Reference to the encryption key in Keychain
-    let iv: String // Initialization vector used for encryption
-    let hash: String // File hash for integrity verification
-}
-
-enum VaultItemType: String, Codable {
-    case document
-    case image
-    case video
-    case audio
-    
-    var allowedMimeTypes: [String] {
-        switch self {
-        case .document:
-            return ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
-        case .image:
-            return ["image/jpeg", "image/png", "image/heic"]
-        case .video:
-            return ["video/mp4", "video/quicktime"]
-        case .audio:
-            return ["audio/mpeg", "audio/mp4"]
-        }
-    }
-    
-    var maxFileSize: Int64 {
-        switch self {
-        case .document:
-            return 100 * 1024 * 1024 // 100MB
-        case .image:
-            return 50 * 1024 * 1024 // 50MB
-        case .video:
-            return 500 * 1024 * 1024 // 500MB
-        case .audio:
-            return 100 * 1024 * 1024 // 100MB
-        }
-    }
 } 

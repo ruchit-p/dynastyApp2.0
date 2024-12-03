@@ -1,4 +1,5 @@
 import SwiftUI
+import os.log
 
 enum Tab {
     case feed
@@ -6,11 +7,22 @@ enum Tab {
     case vault
     case historyBook
     case profile
+    
+    var name: String {
+        switch self {
+        case .feed: return "Feed"
+        case .familyTree: return "Family Tree"
+        case .vault: return "Vault"
+        case .historyBook: return "History Book"
+        case .profile: return "Profile"
+        }
+    }
 }
 
 struct MainTabView: View {
     @EnvironmentObject private var authManager: AuthManager
     @State private var selectedTab: Tab = .feed
+    private let logger = Logger(subsystem: "com.dynasty.MainTabView", category: "Navigation")
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -63,6 +75,14 @@ struct MainTabView: View {
                     Text("Profile")
                 }
                 .tag(Tab.profile)
+        }
+        .onChange(of: selectedTab) { oldTab, newTab in
+            logger.info("User navigated from \(oldTab.name) to \(newTab.name)")
+            
+            // Log additional context if needed
+            if let userId = authManager.user?.id {
+                logger.info("User \(userId) navigated to \(newTab.name)")
+            }
         }
     }
 } 

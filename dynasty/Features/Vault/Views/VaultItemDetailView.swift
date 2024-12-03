@@ -1,338 +1,135 @@
 import SwiftUI
-import QuickLook
-import AVKit
+import UniformTypeIdentifiers
+import os.log
 
 struct VaultItemDetailView: View {
-    let item: VaultItem
-    @StateObject private var viewModel: VaultItemDetailViewModel
+    let document: VaultItem
+    @EnvironmentObject private var authManager: AuthManager
     @Environment(\.dismiss) private var dismiss
-    
-    init(item: VaultItem) {
-        self.item = item
-        self._viewModel = StateObject(wrappedValue: VaultItemDetailViewModel(item: item))
-    }
-    
-    var body: some View {
-        Group {
-            if viewModel.isLoading {
-                loadingView
-            } else if let error = viewModel.error {
-                errorView(error)
-            } else {
-                content
-            }
-        }
-        .navigationTitle(item.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button(action: { viewModel.shareItem() }) {
-                        Label("Share", systemImage: "square.and.arrow.up")
-                    }
-                    
-                    Button(role: .destructive, action: { viewModel.deleteItem() }) {
-                        Label("Delete", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
-        .alert("Error", isPresented: $viewModel.showingError) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(viewModel.error?.localizedDescription ?? "")
-        }
-        .onAppear {
-            viewModel.loadContent()
-        }
-    }
-    
-    private var loadingView: some View {
-        VStack {
-            ProgressView()
-                .progressViewStyle(.circular)
-            if let progress = viewModel.downloadProgress {
-                Text("\(Int(progress * 100))%")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-    
-    private func errorView(_ error: Error) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 50))
-                .foregroundColor(.red)
-            
-            Text("Failed to load content")
-                .font(.headline)
-            
-            Text(error.localizedDescription)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-            
-            Button("Try Again") {
-                viewModel.loadContent()
-            }
-            .buttonStyle(.bordered)
-        }
-        .padding()
-    }
-    
-    private var content: some View {
-        Group {
-            switch item.fileType {
-            case .image:
-                imageContent
-            case .video:
-                videoContent
-            case .audio:
-                audioContent
-            case .document:
-                documentContent
-            }
-        }
-        .padding()
-    }
-    
-    private var imageContent: some View {
-        ScrollView {
-            if let image = viewModel.previewImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-    }
-    
-    private var videoContent: some View {
-        Group {
-            if let url = viewModel.previewURL {
-                VideoPlayer(player: AVPlayer(url: url))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-    }
-    
-    private var audioContent: some View {
-        VStack {
-            if let url = viewModel.previewURL {
-                AudioPlayerView(url: url)
-            }
-        }
-    }
-    
-    private var documentContent: some View {
-        Group {
-            if let url = viewModel.previewURL {
-                QuickLookPreview(url: url)
-            }
-        }
-    }
-}
-
-class VaultItemDetailViewModel: ObservableObject {
-    let item: VaultItem
-    @Published var isLoading = false
-    @Published var error: Error?
-    @Published var showingError = false
-    @Published var downloadProgress: Double?
-    @Published var previewImage: UIImage?
-    @Published var previewURL: URL?
+    @State private var isLoading = false
+    @State private var showDeleteConfirmation = false
+    @State private var error: Error?
+    @State private var showError = false
     
     private let vaultManager = VaultManager.shared
-    private var tempURL: URL?
-    
-    init(item: VaultItem) {
-        self.item = item
-    }
-    
-    func loadContent() {
-        Task { @MainActor in
-            isLoading = true
-            downloadProgress = 0
-            
-            do {
-                let data = try await vaultManager.downloadFile(item: item)
-                await handleDownloadedData(data)
-            } catch {
-                self.error = error
-                self.showingError = true
-            }
-            
-            isLoading = false
-        }
-    }
-    
-    @MainActor
-    private func handleDownloadedData(_ data: Data) async {
-        switch item.fileType {
-        case .image:
-            if let image = UIImage(data: data) {
-                previewImage = image
-            }
-        case .document, .video, .audio:
-            do {
-                // Create temporary file
-                let tempDir = FileManager.default.temporaryDirectory
-                let fileName = "\(UUID().uuidString).\(item.metadata.originalFileName)"
-                let url = tempDir.appendingPathComponent(fileName)
-                
-                try data.write(to: url)
-                tempURL = url
-                previewURL = url
-            } catch {
-                self.error = error
-                self.showingError = true
-            }
-        }
-    }
-    
-    func shareItem() {
-        // Implement sharing functionality
-    }
-    
-    func deleteItem() {
-        Task { @MainActor in
-            isLoading = true
-            
-            do {
-                try await vaultManager.deleteItem(item)
-                // Close the detail view
-            } catch {
-                self.error = error
-                self.showingError = true
-            }
-            
-            isLoading = false
-        }
-    }
-    
-    deinit {
-        // Clean up temporary files
-        if let url = tempURL {
-            try? FileManager.default.removeItem(at: url)
-        }
-    }
-}
-
-struct QuickLookPreview: UIViewControllerRepresentable {
-    let url: URL
-    
-    func makeUIViewController(context: Context) -> QLPreviewController {
-        let controller = QLPreviewController()
-        controller.dataSource = context.coordinator
-        return controller
-    }
-    
-    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {}
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(url: url)
-    }
-    
-    class Coordinator: NSObject, QLPreviewControllerDataSource {
-        let url: URL
-        
-        init(url: URL) {
-            self.url = url
-            super.init()
-        }
-        
-        func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-            1
-        }
-        
-        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-            url as QLPreviewItem
-        }
-    }
-}
-
-struct AudioPlayerView: View {
-    let url: URL
-    @StateObject private var audioPlayer = AudioPlayer()
+    private let logger = Logger(subsystem: "com.dynasty.VaultItemDetailView", category: "UI")
     
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "waveform")
-                .font(.system(size: 50))
-                .foregroundColor(.accentColor)
+        List {
+            Section("Details") {
+                LabeledContent("Name", value: document.title)
+                LabeledContent("Type", value: document.fileType.rawValue.capitalized)
+                LabeledContent("Size", value: formatFileSize(document.metadata.fileSize))
+                if let description = document.description {
+                    LabeledContent("Description", value: description)
+                }
+                LabeledContent("Added", value: document.createdAt.formatted())
+                LabeledContent("Modified", value: document.updatedAt.formatted())
+            }
             
-            HStack {
-                Button(action: audioPlayer.togglePlayback) {
-                    Image(systemName: audioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 44))
+            Section {
+                Button(action: downloadDocument) {
+                    Label("Download", systemImage: "arrow.down.circle")
+                }
+                .disabled(isLoading)
+                
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(isLoading)
+            }
+        }
+        .navigationTitle("Document Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(error?.localizedDescription ?? "An unknown error occurred")
+        }
+        .confirmationDialog(
+            "Are you sure you want to delete this document?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive, action: deleteDocument)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
+        }
+        .overlay {
+            if isLoading {
+                ProgressView()
+                    .progressViewStyle(.circular)
+            }
+        }
+    }
+    
+    private func downloadDocument() {
+        guard let userId = authManager.user?.id else { return }
+        
+        isLoading = true
+        Task {
+            do {
+                logger.info("Starting download for document: \(document.id)")
+                let data = try await vaultManager.downloadFile(document, userId: userId)
+                
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(document.title)
+                try data.write(to: tempURL, options: .atomic)
+                
+                await MainActor.run {
+                    let activityVC = UIActivityViewController(
+                        activityItems: [tempURL],
+                        applicationActivities: nil
+                    )
+                    
+                    // Find the current window scene and present the activity view controller
+                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                       let window = windowScene.windows.first,
+                       let rootVC = window.rootViewController {
+                        activityVC.completionWithItemsHandler = { _, _, _, _ in
+                            // Clean up temp file after sharing
+                            try? FileManager.default.removeItem(at: tempURL)
+                        }
+                        rootVC.present(activityVC, animated: true)
+                    }
                 }
                 
-                if let duration = audioPlayer.duration {
-                    Slider(value: $audioPlayer.currentTime, in: 0...duration)
-                }
+                logger.info("Successfully downloaded document: \(document.id)")
+            } catch {
+                logger.error("Failed to download document: \(error.localizedDescription)")
+                self.error = error
+                self.showError = true
             }
-            .padding()
-            
-            HStack {
-                Text(formatTime(audioPlayer.currentTime))
-                Spacer()
-                if let duration = audioPlayer.duration {
-                    Text(formatTime(duration))
+            isLoading = false
+        }
+    }
+    
+    private func deleteDocument() {
+        isLoading = true
+        Task {
+            do {
+                logger.info("Deleting document: \(document.id)")
+                try await vaultManager.deleteItem(document)
+                logger.info("Successfully deleted document: \(document.id)")
+                await MainActor.run {
+                    dismiss()
                 }
+            } catch {
+                logger.error("Failed to delete document: \(error.localizedDescription)")
+                self.error = error
+                self.showError = true
+                isLoading = false
             }
-            .font(.caption)
-            .foregroundColor(.secondary)
-        }
-        .padding()
-        .onAppear {
-            audioPlayer.setAudio(url: url)
         }
     }
     
-    private func formatTime(_ time: TimeInterval) -> String {
-        let minutes = Int(time) / 60
-        let seconds = Int(time) % 60
-        return String(format: "%d:%02d", minutes, seconds)
-    }
-}
-
-class AudioPlayer: ObservableObject {
-    private var player: AVPlayer?
-    @Published var isPlaying = false
-    @Published var currentTime: TimeInterval = 0
-    @Published var duration: TimeInterval?
-    private var timeObserver: Any?
-    
-    func setAudio(url: URL) {
-        player = AVPlayer(url: url)
-        setupTimeObserver()
-        duration = player?.currentItem?.duration.seconds
-    }
-    
-    func togglePlayback() {
-        if isPlaying {
-            player?.pause()
-        } else {
-            player?.play()
-        }
-        isPlaying.toggle()
-    }
-    
-    private func setupTimeObserver() {
-        timeObserver = player?.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
-            queue: .main
-        ) { [weak self] time in
-            self?.currentTime = time.seconds
-        }
-    }
-    
-    deinit {
-        if let observer = timeObserver {
-            player?.removeTimeObserver(observer)
-        }
+    private func formatFileSize(_ size: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: size)
     }
 }

@@ -1,189 +1,438 @@
 import Foundation
-import FirebaseStorage
-import FirebaseFirestore
-import Combine
+import LocalAuthentication
+import CryptoKit
+import os.log
+import UniformTypeIdentifiers
 
 enum VaultError: LocalizedError {
-    case fileTooLarge
-    case encodingFailed
-    case decodingFailed
-    case uploadFailed
-    case downloadFailed
-    case deletionFailed
-    case invalidFileType
-    case fileNotFound
-    case unauthorized
+    case authenticationFailed(String)
+    case encryptionFailed(String)
+    case decryptionFailed(String)
+    case fileOperationFailed(String)
+    case invalidData(String)
+    case databaseError(String)
+    case itemNotFound(String)
+    case duplicateItem(String)
+    case vaultLocked
+    case fileTooLarge(String)
+    case unknown(String)
+    case authenticationCancelled
     
     var errorDescription: String? {
         switch self {
-        case .fileTooLarge:
-            return "File size exceeds maximum allowed size"
-        case .encodingFailed:
-            return "Failed to encode data"
-        case .decodingFailed:
-            return "Failed to decode data"
-        case .uploadFailed:
-            return "Failed to upload file"
-        case .downloadFailed:
-            return "Failed to download file"
-        case .deletionFailed:
-            return "Failed to delete file"
-        case .invalidFileType:
-            return "Invalid file type"
-        case .fileNotFound:
-            return "File not found"
-        case .unauthorized:
-            return "Unauthorized access"
+        case .authenticationFailed(let reason):
+            return "Authentication failed: \(reason)"
+        case .encryptionFailed(let reason):
+            return "Encryption failed: \(reason)"
+        case .decryptionFailed(let reason):
+            return "Decryption failed: \(reason)"
+        case .fileOperationFailed(let reason):
+            return "File operation failed: \(reason)"
+        case .invalidData(let reason):
+            return "Invalid data: \(reason)"
+        case .databaseError(let reason):
+            return "Database error: \(reason)"
+        case .itemNotFound(let reason):
+            return "Item not found: \(reason)"
+        case .duplicateItem(let reason):
+            return "Duplicate item: \(reason)"
+        case .vaultLocked:
+            return "Vault is locked"
+        case .fileTooLarge(let reason):
+            return "File too large: \(reason)"
+        case .unknown(let reason):
+            return "Unknown error: \(reason)"
+        case .authenticationCancelled:
+            return "Authentication was cancelled"
         }
     }
 }
 
+@MainActor
 class VaultManager: ObservableObject {
     static let shared = VaultManager()
     
-    private let storage = Storage.storage()
-    private let db = Firestore.firestore()
-    private let encryptionService = VaultEncryptionService.shared
+    @Published private(set) var isLocked = true
+    @Published private(set) var isAuthenticating = false
+    @Published private(set) var items: [VaultItem] = []
+    @Published private(set) var isProcessing = false
+    @Published private(set) var processingProgress: Double = 0
+    @Published private(set) var isDocumentPickerPresented = false
     
-    @Published var items: [VaultItem] = []
-    @Published var isLoading = false
-    @Published var error: Error?
+    private let logger = Logger(subsystem: "com.dynasty.VaultManager", category: "Vault")
+    private let encryptionService: VaultEncryptionService
+    private let fileManager: FileManager
+    private let dbManager: Vault.DatabaseManager
+    private var processingTask: Task<Void, Error>?
+    private var currentAuthenticationTask: Task<Bool, Error>?
     
-    private init() {}
+    init() {
+        self.encryptionService = VaultEncryptionService.shared
+        self.fileManager = FileManager.default
+        self.dbManager = Vault.DatabaseManager.shared
+        logger.info("VaultManager initialized")
+    }
     
-    // Upload file to vault
-    func uploadFile(userId: String, fileURL: URL, title: String, description: String?, type: VaultItemType) async throws -> VaultItem {
-        isLoading = true
-        defer { isLoading = false }
-        
-        // Validate file size
-        let fileSize = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard Int64(fileSize) <= type.maxFileSize else {
-            throw VaultError.fileTooLarge
+    func loadItems() async throws -> [VaultItem] {
+        if isLocked {
+            try await unlock()
         }
         
-        // Read file data
-        let fileData = try Data(contentsOf: fileURL)
+        do {
+            logger.info("Loading vault items")
+            let items = try await dbManager.fetchItems()
+            logger.info("Successfully loaded \(items.count) items")
+            return items
+        } catch {
+            logger.error("Failed to load items: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    func unlock() async throws {
+        guard isLocked else { return }
+        guard !isAuthenticating else { return }
         
-        // Generate encryption key
-        let keyId = try encryptionService.generateEncryptionKey(for: userId)
+        // Cancel any existing authentication task
+        currentAuthenticationTask?.cancel()
+        currentAuthenticationTask = nil
         
-        // Encrypt file
-        let (encryptedData, iv) = try encryptionService.encryptFile(data: fileData, userId: userId, keyId: keyId)
+        isAuthenticating = true
         
-        // Generate file hash
-        let fileHash = encryptionService.generateFileHash(for: fileData)
+        defer {
+            isAuthenticating = false
+            currentAuthenticationTask = nil
+        }
         
-        // Create storage reference
-        let fileName = UUID().uuidString
-        let storageRef = storage.reference().child("users/\(userId)/vault/\(fileName)")
+        do {
+            // Create a new authentication task
+            let authSuccess = try await withThrowingTaskGroup(of: Bool.self) { group in
+                group.addTask { [weak self] in
+                    guard let self = self else { throw VaultError.unknown("VaultManager deallocated") }
+                    
+                    // First authenticate with Face ID/Touch ID
+                    let context = LAContext()
+                    let reason = "Authenticate to access your vault"
+                    
+                    guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) else {
+                        logger.error("Biometric authentication not available")
+                        throw VaultError.authenticationFailed("Biometric authentication not available")
+                    }
+                    
+                    return try await withCheckedThrowingContinuation { continuation in
+                        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, error in
+                            if Task.isCancelled {
+                                continuation.resume(throwing: VaultError.authenticationCancelled)
+                                return
+                            }
+                            
+                            if success {
+                                continuation.resume(returning: true)
+                            } else {
+                                if let laError = error as? LAError {
+                                    switch laError.code {
+                                    case .userCancel, .systemCancel, .appCancel:
+                                        continuation.resume(throwing: VaultError.authenticationCancelled)
+                                    default:
+                                        continuation.resume(throwing: VaultError.authenticationFailed(laError.localizedDescription))
+                                    }
+                                } else {
+                                    let message = error?.localizedDescription ?? "Unknown error"
+                                    continuation.resume(throwing: VaultError.authenticationFailed(message))
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Get the first (and only) result
+                guard let success = try await group.next() else {
+                    throw VaultError.authenticationFailed("Authentication failed")
+                }
+                
+                return success
+            }
+            
+            guard authSuccess else {
+                throw VaultError.authenticationFailed("Authentication failed")
+            }
+            
+            // Only proceed with vault unlocking if authentication succeeded
+            try await encryptionService.initialize()
+            try dbManager.openDatabase()
+            let items = try await dbManager.fetchItems()
+            self.items = items
+            isLocked = false
+            logger.info("Vault unlocked successfully")
+        } catch {
+            logger.error("Failed to unlock vault: \(error.localizedDescription)")
+            // Clean up on failure
+            dbManager.closeDatabase()
+            encryptionService.clearKeys()
+            isLocked = true
+            items.removeAll()
+            
+            // Rethrow the error to be handled by the view
+            throw error
+        }
+    }
+    
+    func lock() {
+        // Don't lock if we're showing document picker
+        guard !isDocumentPickerPresented else { return }
         
-        // Upload encrypted file
-        let metadata = StorageMetadata()
-        metadata.contentType = type.allowedMimeTypes.first
+        // Don't lock if we're already locked
+        guard !isLocked else { return }
         
-        _ = try await storageRef.putDataAsync(encryptedData, metadata: metadata)
-        let downloadURL = try await storageRef.downloadURL()
+        logger.info("Locking vault")
+        isLocked = true
+        isAuthenticating = false
+        currentAuthenticationTask?.cancel()
+        currentAuthenticationTask = nil
+        items.removeAll()
+        dbManager.closeDatabase()
+        encryptionService.clearKeys()
+        logger.info("Vault locked successfully")
+    }
+    
+    func setDocumentPickerPresented(_ isPresented: Bool) {
+        isDocumentPickerPresented = isPresented
+    }
+    
+    func importItems(from urls: [URL], userId: String) async throws {
+        guard !isLocked else {
+            throw VaultError.vaultLocked
+        }
         
-        // Create vault item
-        let vaultItem = VaultItem(
-            id: UUID().uuidString,
-            userId: userId,
-            title: title,
-            description: description,
-            fileType: type,
-            encryptedFileURL: downloadURL.absoluteString,
-            thumbnailURL: nil,
-            metadata: VaultItemMetadata(
-                originalFileName: fileURL.lastPathComponent,
-                fileSize: Int64(fileSize),
-                mimeType: type.allowedMimeTypes.first ?? "application/octet-stream",
+        isProcessing = true
+        processingProgress = 0
+        
+        do {
+            let totalItems = Double(urls.count)
+            var processedItems = 0.0
+            
+            for url in urls {
+                let item = try await importItem(from: url, userId: userId)
+                items.append(item)
+                
+                processedItems += 1
+                processingProgress = processedItems / totalItems
+            }
+            
+            try await saveItems()
+            logger.info("Successfully imported \(urls.count) items")
+        } catch {
+            logger.error("Failed to import items: \(error.localizedDescription)")
+            throw error
+        }
+        
+        isProcessing = false
+        processingProgress = 0
+    }
+    
+    private func importItem(from url: URL, userId: String) async throws -> VaultItem {
+        logger.info("Starting import of file: \(url.lastPathComponent)")
+        
+        // Start accessing the security-scoped resource
+        guard url.startAccessingSecurityScopedResource() else {
+            logger.error("Failed to access security-scoped resource: \(url.lastPathComponent)")
+            throw VaultError.fileOperationFailed("Permission denied to access file")
+        }
+        
+        defer {
+            // Make sure to release the security-scoped resource when done
+            url.stopAccessingSecurityScopedResource()
+        }
+        
+        do {
+            let data = try Data(contentsOf: url)
+            
+            // Validate file size
+            let fileSize = Int64(data.count)
+            let fileType = determineFileType(from: url)
+            guard fileSize <= fileType.maxFileSize else {
+                logger.error("File too large: \(fileSize) bytes")
+                throw VaultError.fileTooLarge("File size exceeds maximum allowed size of \(ByteCountFormatter().string(fromByteCount: fileType.maxFileSize))")
+            }
+            
+            // Generate a new encryption key for the file
+            logger.info("Generating encryption key")
+            let keyId = try encryptionService.generateEncryptionKey(for: userId)
+            
+            // Encrypt the file data
+            logger.info("Encrypting file data")
+            let (encryptedData, iv) = try encryptionService.encryptFile(data: data, userId: userId, keyId: keyId)
+            
+            // Save encrypted data to a file
+            logger.info("Saving encrypted data")
+            let encryptedFileURL = try saveEncryptedData(encryptedData, fileName: UUID().uuidString)
+            
+            // Compute file hash
+            let fileHash = encryptionService.generateFileHash(for: data)
+            
+            let mimeType = try determineMimeType(for: url)
+            
+            // Create metadata
+            let metadata = VaultItemMetadata(
+                originalFileName: url.lastPathComponent,
+                fileSize: fileSize,
+                mimeType: mimeType,
                 encryptionKeyId: keyId,
                 iv: iv,
                 hash: fileHash
-            ),
-            createdAt: Date(),
-            updatedAt: Date()
-        )
-        
-        // Save to Firestore
-        try await db.collection("vaultItems").document(vaultItem.id).setData(try encodeToDict(vaultItem))
-        
-        return vaultItem
+            )
+            
+            let item = VaultItem(
+                id: UUID().uuidString,
+                userId: userId,
+                title: url.lastPathComponent,
+                description: nil,
+                fileType: fileType,
+                encryptedFileURL: encryptedFileURL.path,
+                thumbnailURL: nil,
+                metadata: metadata,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+            
+            logger.info("Successfully imported file: \(url.lastPathComponent)")
+            return item
+        } catch {
+            logger.error("Failed to import file: \(error.localizedDescription)")
+            throw error
+        }
     }
     
-    // Download and decrypt file
-    func downloadFile(item: VaultItem) async throws -> Data {
-        isLoading = true
-        defer { isLoading = false }
+    private func saveEncryptedData(_ data: Data, fileName: String) throws -> URL {
+        logger.info("Saving encrypted data to file: \(fileName)")
+        do {
+            let documentsDirectory = try fileManager.url(
+                for: .documentDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let folderURL = documentsDirectory.appendingPathComponent("Vault", isDirectory: true)
+            
+            if !fileManager.fileExists(atPath: folderURL.path) {
+                try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true, attributes: nil)
+            }
+            
+            let fileURL = folderURL.appendingPathComponent(fileName)
+            try data.write(to: fileURL, options: .completeFileProtection)
+            logger.info("Successfully saved encrypted data")
+            return fileURL
+        } catch {
+            logger.error("Failed to save encrypted data: \(error.localizedDescription)")
+            throw VaultError.fileOperationFailed("Failed to save encrypted file: \(error.localizedDescription)")
+        }
+    }
+    
+    private func determineFileType(from url: URL) -> VaultItemType {
+        let typeIdentifier = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier ?? ""
         
-        // Download encrypted file
-        let storageRef = storage.reference(forURL: item.encryptedFileURL)
-        let encryptedData = try await storageRef.data(maxSize: Int64.max)
+        if let utType = UTType(typeIdentifier ?? "") {
+            if utType.conforms(to: .image) {
+                return .image
+            } else if utType.conforms(to: .movie) {
+                return .video
+            } else if utType.conforms(to: .audio) {
+                return .audio
+            }
+        }
+        return .document
+    }
+    
+    private func determineMimeType(for url: URL) throws -> String {
+        let typeIdentifier = try url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier ?? ""
+        if let utType = UTType(typeIdentifier) {
+            return utType.preferredMIMEType ?? "application/octet-stream"
+        }
+        return "application/octet-stream"
+    }
+    
+    private func saveItems() async throws {
+        try await dbManager.saveItems(items)
+    }
+    
+    func deleteItems(at offsets: IndexSet) async throws {
+        guard !isLocked else {
+            throw VaultError.vaultLocked
+        }
         
-        // Decrypt file
+        items.remove(atOffsets: offsets)
+        try await saveItems()
+    }
+    
+    func getDecryptedData(for item: VaultItem, userId: String) async throws -> Data {
+        guard !isLocked else {
+            throw VaultError.vaultLocked
+        }
+        
+        // Retrieve encrypted data from file
+        let encryptedFileURL = URL(fileURLWithPath: item.encryptedFileURL)
+        let encryptedData = try Data(contentsOf: encryptedFileURL)
+        
+        // Get encryption parameters from metadata
+        let keyId = item.metadata.encryptionKeyId
+        let iv = item.metadata.iv
+        
+        // Decrypt data
         let decryptedData = try encryptionService.decryptFile(
             encryptedData: encryptedData,
-            userId: item.userId,
-            keyId: item.metadata.encryptionKeyId,
-            iv: item.metadata.iv
+            userId: userId,
+            keyId: keyId,
+            iv: iv
         )
-        
-        // Verify file integrity
-        let fileHash = encryptionService.generateFileHash(for: decryptedData)
-        guard fileHash == item.metadata.hash else {
-            throw VaultEncryptionError.fileIntegrityCompromised
-        }
         
         return decryptedData
     }
     
-    // Fetch vault items for user
-    func fetchItems(for userId: String) async throws {
-        isLoading = true
-        defer { isLoading = false }
+    func cancelProcessing() {
+        processingTask?.cancel()
+        isProcessing = false
+        processingProgress = 0
+    }
+    
+    func downloadFile(_ item: VaultItem, userId: String) async throws -> Data {
+        guard !isLocked else {
+            throw VaultError.vaultLocked
+        }
         
-        let snapshot = try await db.collection("vaultItems")
-            .whereField("userId", isEqualTo: userId)
-            .order(by: "createdAt", descending: true)
-            .getDocuments()
-        
-        items = try snapshot.documents.compactMap { document in
-            let data = document.data()
-            return try decodeFromDict(data, type: VaultItem.self)
+        logger.info("Downloading file: \(item.id)")
+        do {
+            let data = try await getDecryptedData(for: item, userId: userId)
+            logger.info("Successfully downloaded file: \(item.id)")
+            return data
+        } catch {
+            logger.error("Failed to download file: \(error.localizedDescription)")
+            throw error
         }
     }
     
-    // Delete vault item
     func deleteItem(_ item: VaultItem) async throws {
-        isLoading = true
-        defer { isLoading = false }
-        
-        // Delete from Storage
-        let storageRef = storage.reference(forURL: item.encryptedFileURL)
-        try await storageRef.delete()
-        
-        // Delete from Firestore
-        try await db.collection("vaultItems").document(item.id).delete()
-        
-        // Delete encryption key
-        _ = encryptionService.deleteEncryptionKey(for: item.userId, keyId: item.metadata.encryptionKeyId)
-        
-        // Remove from local array
-        items.removeAll { $0.id == item.id }
-    }
-    
-    // Helper functions for Firestore encoding/decoding
-    private func encodeToDict<T: Encodable>(_ value: T) throws -> [String: Any] {
-        let data = try JSONEncoder().encode(value)
-        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw VaultError.encodingFailed
+        guard !isLocked else {
+            throw VaultError.vaultLocked
         }
-        return dict
-    }
-    
-    private func decodeFromDict<T: Decodable>(_ dict: [String: Any], type: T.Type) throws -> T {
-        let data = try JSONSerialization.data(withJSONObject: dict)
-        return try JSONDecoder().decode(type, from: data)
+        
+        logger.info("Deleting item: \(item.id)")
+        do {
+            // Delete encrypted file
+            let encryptedFileURL = URL(fileURLWithPath: item.encryptedFileURL)
+            try fileManager.removeItem(at: encryptedFileURL)
+            
+            // Remove from items array
+            if let index = items.firstIndex(where: { $0.id == item.id }) {
+                items.remove(at: index)
+            }
+            
+            // Update database
+            try await saveItems()
+            
+            logger.info("Successfully deleted item: \(item.id)")
+        } catch {
+            logger.error("Failed to delete item: \(error.localizedDescription)")
+            throw VaultError.fileOperationFailed("Failed to delete file: \(error.localizedDescription)")
+        }
     }
 } 

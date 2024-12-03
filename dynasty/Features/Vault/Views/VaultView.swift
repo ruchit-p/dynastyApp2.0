@@ -63,30 +63,27 @@ enum VaultAuthState {
 
 struct VaultView: View {
     @Binding var selectedTab: Tab
-    @State private var isUnlocked = false
+    @StateObject private var vaultManager = VaultManager.shared
+    @EnvironmentObject private var authManager: AuthManager
+    @Environment(\.scenePhase) private var scenePhase
+    
     @State private var showingAuthError = false
     @State private var errorMessage = ""
     @State private var authAttempts = 0
     @State private var isLockedOut = false
     @State private var lockoutTimer: Timer?
-    @State private var vaultLockTimer: Timer?
-    @State private var authState: VaultAuthState = .initial
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
-    @EnvironmentObject private var authManager: AuthManager
+    @State private var isPresentingDocumentPicker = false
+    @State private var shouldNavigateBack = false
     
     private let logger = Logger(subsystem: "com.dynasty.VaultView", category: "Security")
     private let maxAuthAttempts = 5
     private let lockoutDuration: TimeInterval = 300 // 5 minutes
-    private let vaultAutoLockDuration: TimeInterval = 60 // 1 minute
     
     var body: some View {
         NavigationView {
             Group {
-                if isUnlocked {
-                    VaultContentView()
-                } else if isLockedOut {
-                    LockoutView(remainingTime: $lockoutTimer)
+                if !vaultManager.isLocked {
+                    VaultContentView(isPresentingDocumentPicker: $isPresentingDocumentPicker)
                 } else {
                     // Lock Screen
                     VStack {
@@ -103,7 +100,7 @@ struct VaultView: View {
                             .foregroundColor(.secondary)
                             .padding(.bottom)
                         
-                        if case .authenticating = authState {
+                        if vaultManager.isAuthenticating {
                             ProgressView()
                                 .padding()
                         } else {
@@ -117,6 +114,11 @@ struct VaultView: View {
                             }
                             .padding(.horizontal)
                             .disabled(isLockedOut)
+                            
+                            Button("Cancel") {
+                                shouldNavigateBack = true
+                            }
+                            .padding()
                         }
                         
                         if authAttempts > 0 {
@@ -125,136 +127,117 @@ struct VaultView: View {
                                 .padding(.top)
                         }
                     }
-                    .alert("Authentication Error", isPresented: $showingAuthError) {
-                        Button("Try Again", action: authenticate)
-                            .disabled(isLockedOut)
-                        Button("Cancel", role: .cancel) {
-                            dismiss()
-                        }
-                    } message: {
-                        Text(errorMessage)
-                    }
                 }
             }
             .navigationBarHidden(true)
         }
+        .onChange(of: shouldNavigateBack) { _, shouldNavigate in
+            if shouldNavigate {
+                selectedTab = .feed
+                shouldNavigateBack = false
+            }
+        }
         .onAppear {
-            // Initialize database and start authentication only if not already unlocked
-            DatabaseManager.shared.openDatabase()
-            if !isUnlocked {
-                authState = .initial
+            // Only trigger authentication when first appearing and vault is locked
+            if selectedTab == .vault && vaultManager.isLocked && !vaultManager.isAuthenticating {
                 authenticate()
             }
-            cancelVaultLockTimer()
         }
         .onDisappear {
-            // Start the timer when the view disappears
-            startVaultLockTimer()
+            // Lock vault when leaving the view
+            if !isPresentingDocumentPicker {
+                lockVault()
+            }
         }
         .onChange(of: selectedTab) { oldValue, newValue in
-            if newValue != .vault {
-                // User has left the vault tab
-                logger.info("User left vault tab, starting auto-lock timer")
-                startVaultLockTimer()
-            } else {
-                // User has returned to the vault tab
-                logger.info("User returned to vault tab")
-                cancelVaultLockTimer()
-                if !isUnlocked {
-                    authenticate()
+            if oldValue == .vault && newValue != .vault {
+                // Lock when switching away from vault tab
+                if !isPresentingDocumentPicker {
+                    lockVault()
                 }
+            } else if newValue == .vault && vaultManager.isLocked && !vaultManager.isAuthenticating {
+                // Authenticate when switching to vault tab
+                authenticate()
             }
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             switch newPhase {
             case .inactive, .background:
-                // Lock vault when app goes to background
-                logger.info("App entering background, locking vault")
-                lockVault()
+                if !vaultManager.isAuthenticating && !isPresentingDocumentPicker {
+                    logger.info("App entering background, locking vault")
+                    lockVault()
+                }
             case .active:
-                // Require authentication when becoming active
-                logger.info("App becoming active")
-                if !isUnlocked {
+                // Only trigger authentication if coming from background and vault is selected and locked
+                if selectedTab == .vault && vaultManager.isLocked && oldPhase == .background && !vaultManager.isAuthenticating {
+                    logger.info("App becoming active, authenticating vault")
                     authenticate()
                 }
             @unknown default:
                 break
             }
         }
+        .onChange(of: isPresentingDocumentPicker) { wasPresenting, isPresenting in
+            vaultManager.setDocumentPickerPresented(isPresenting)
+        }
+        .alert("Authentication Error", isPresented: $showingAuthError) {
+            Button("Try Again", action: authenticate)
+                .disabled(isLockedOut)
+            Button("Cancel", role: .cancel) {
+                shouldNavigateBack = true
+            }
+        } message: {
+            Text(errorMessage)
+        }
     }
     
-    private func startVaultLockTimer() {
-        cancelVaultLockTimer()
-        logger.info("Starting vault auto-lock timer for \(vaultAutoLockDuration) seconds")
-        vaultLockTimer = Timer.scheduledTimer(withTimeInterval: vaultAutoLockDuration, repeats: false) { _ in
-            DispatchQueue.main.async {
-                logger.info("Auto-lock timer expired, locking vault")
-                lockVault()
+    private func authenticate() {
+        guard !isLockedOut && !vaultManager.isAuthenticating else { return }
+        
+        logger.info("Starting vault authentication attempt \(authAttempts + 1) of \(maxAuthAttempts)")
+        
+        Task {
+            do {
+                try await vaultManager.unlock()
+                // Reset attempts on success
+                authAttempts = 0
+            } catch VaultError.authenticationCancelled {
+                logger.info("Authentication cancelled by user")
+                shouldNavigateBack = true
+            } catch {
+                handleAuthenticationError(error: error)
             }
         }
     }
     
-    private func cancelVaultLockTimer() {
-        if vaultLockTimer != nil {
-            logger.info("Cancelling vault auto-lock timer")
-            vaultLockTimer?.invalidate()
-            vaultLockTimer = nil
+    private func handleAuthenticationError(error: Error) {
+        authAttempts += 1
+        logger.error("Authentication failed (Attempt \(authAttempts)): \(error.localizedDescription)")
+        
+        if authAttempts >= maxAuthAttempts {
+            handleLockout()
+        } else {
+            errorMessage = error.localizedDescription
+            showingAuthError = true
+        }
+    }
+    
+    private func handleLockout() {
+        logger.warning("Maximum authentication attempts reached, initiating lockout")
+        isLockedOut = true
+        errorMessage = "Too many failed attempts. Please try again in 5 minutes."
+        showingAuthError = true
+        
+        lockoutTimer = Timer.scheduledTimer(withTimeInterval: lockoutDuration, repeats: false) { _ in
+            logger.info("Lockout period ended")
+            isLockedOut = false
+            authAttempts = 0
         }
     }
     
     private func lockVault() {
         logger.info("Locking vault")
-        isUnlocked = false
-        authState = .initial
-        authAttempts = 0
-        DatabaseManager.shared.closeDatabase()
-        cancelVaultLockTimer()
-    }
-    
-    private func authenticate() {
-        guard !isLockedOut else {
-            logger.warning("Authentication attempted while locked out")
-            return
-        }
-        
-        let context = LAContext()
-        var error: NSError?
-        
-        logger.info("Starting vault authentication attempt \(authAttempts + 1) of \(maxAuthAttempts)")
-        authState = .authenticating
-        
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            let errorDescription = error?.localizedDescription ?? "Authentication not available"
-            logger.error("Authentication not available: \(errorDescription)")
-            handleAuthenticationError(error: error ?? NSError(domain: "VaultView", code: -1, userInfo: [NSLocalizedDescriptionKey: errorDescription]))
-            return
-        }
-        
-        let authReason = "Authenticate to access your secure vault"
-        logger.info("Attempting authentication with \(context.biometryType == .faceID ? "Face ID" : context.biometryType == .touchID ? "Touch ID" : "passcode")")
-        
-        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: authReason) { success, error in
-            DispatchQueue.main.async {
-                if success {
-                    logger.info("Authentication successful")
-                    withAnimation {
-                        isUnlocked = true
-                        authState = .success
-                        authAttempts = 0
-                        DatabaseManager.shared.openDatabase()
-                    }
-                } else {
-                    authAttempts += 1
-                    logger.error("Authentication failed (Attempt \(authAttempts)): \(error?.localizedDescription ?? "Unknown error")")
-                    
-                    if authAttempts >= maxAuthAttempts {
-                        handleLockout()
-                    } else if let error = error {
-                        handleAuthenticationError(error: error)
-                    }
-                }
-            }
-        }
+        vaultManager.lock()
     }
     
     private func getBiometricButtonLabel() -> String {
@@ -279,57 +262,6 @@ struct VaultView: View {
         default:
             return "key.fill"
         }
-    }
-    
-    private func handleLockout() {
-        logger.warning("Maximum authentication attempts reached, initiating lockout")
-        isLockedOut = true
-        errorMessage = "Too many failed attempts. Please try again in 5 minutes."
-        showingAuthError = true
-        
-        // Start lockout timer
-        lockoutTimer = Timer.scheduledTimer(withTimeInterval: lockoutDuration, repeats: false) { _ in
-            logger.info("Lockout period ended")
-            isLockedOut = false
-            authAttempts = 0
-        }
-    }
-    
-    private func handleAuthenticationError(error: Error) {
-        authState = .failed(error)
-        
-        if let laError = error as? LAError {
-            switch laError.code {
-            case .authenticationFailed:
-                errorMessage = "Authentication failed. Please try again."
-                logger.error("Authentication failed: Invalid biometric or passcode")
-            case .userCancel:
-                errorMessage = "Authentication cancelled."
-                logger.info("User cancelled authentication")
-                dismiss()
-                return
-            case .userFallback:
-                logger.info("User requested fallback to passcode")
-                return
-            case .biometryNotAvailable:
-                errorMessage = "Face ID/Touch ID is not available on this device."
-                logger.error("Biometric authentication not available")
-            case .biometryNotEnrolled:
-                errorMessage = "Please set up Face ID/Touch ID in your device settings or use your passcode."
-                logger.warning("Biometric authentication not enrolled")
-            case .biometryLockout:
-                errorMessage = "Too many failed attempts. Please use your device passcode."
-                logger.warning("Biometric authentication locked out")
-            default:
-                errorMessage = error.localizedDescription
-                logger.error("Unexpected authentication error: \(error.localizedDescription)")
-            }
-        } else {
-            errorMessage = error.localizedDescription
-            logger.error("Unknown authentication error: \(error.localizedDescription)")
-        }
-        
-        showingAuthError = true
     }
 }
 
@@ -371,6 +303,8 @@ struct LockoutView: View {
 }
 
 struct VaultContentView: View {
+    @Binding var isPresentingDocumentPicker: Bool
+    
     var body: some View {
         NavigationView {
             List {
@@ -396,7 +330,7 @@ struct VaultContentView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
-                        // Add new document/photo
+                        isPresentingDocumentPicker = true
                     }) {
                         Image(systemName: "plus")
                     }
