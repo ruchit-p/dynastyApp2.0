@@ -49,8 +49,19 @@ class FirebaseStorageService {
             
             return try await withCheckedThrowingContinuation { continuation in
                 let task = fileRef.getData(maxSize: maxSize) { data, error in
-                    if let error = error {
-                        continuation.resume(throwing: error)
+                    if let error = error as? NSError {
+                        if error.domain == StorageErrorDomain {
+                            switch error.code {
+                            case StorageErrorCode.unauthorized.rawValue:
+                                continuation.resume(throwing: VaultError.fileOperationFailed("Unauthorized access to file. Please check permissions."))
+                            case StorageErrorCode.objectNotFound.rawValue:
+                                continuation.resume(throwing: VaultError.fileOperationFailed("File not found in storage."))
+                            default:
+                                continuation.resume(throwing: VaultError.fileOperationFailed("Storage error: \(error.localizedDescription)"))
+                            }
+                        } else {
+                            continuation.resume(throwing: error)
+                        }
                         return
                     }
                     
@@ -61,6 +72,7 @@ class FirebaseStorageService {
                     }
                 }
                 
+                // Observe download progress
                 task.observe(.progress) { snapshot in
                     if let progress = snapshot.progress {
                         let percentComplete = Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
@@ -68,19 +80,9 @@ class FirebaseStorageService {
                     }
                 }
             }
-        } catch let error as NSError {
+        } catch {
             logger.error("Failed to download encrypted data: \(error.localizedDescription)")
-            if error.domain == StorageErrorDomain {
-                switch error.code {
-                case StorageErrorCode.unauthorized.rawValue:
-                    throw VaultError.fileOperationFailed("Unauthorized access to file. Please check permissions.")
-                case StorageErrorCode.objectNotFound.rawValue:
-                    throw VaultError.fileOperationFailed("File not found in storage.")
-                default:
-                    throw VaultError.fileOperationFailed("Storage error: \(error.localizedDescription)")
-                }
-            }
-            throw VaultError.fileOperationFailed("Failed to download encrypted file: \(error.localizedDescription)")
+            throw error
         }
     }
     

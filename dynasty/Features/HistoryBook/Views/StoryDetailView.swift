@@ -73,7 +73,7 @@ struct StoryDetailView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingShareSheet) {
-            ShareSheet(items: [story.title, story.content])
+            ShareSheet(activityItems: [story.title, story.content])
         }
         .onAppear {
             setupLikesListener()
@@ -126,16 +126,4 @@ struct StoryDetailView: View {
             return AttributedString(markdown)
         }
     }
-}
-
-// ShareSheet Utility
-struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    
-    func makeUIViewController(context: Context) -> some UIViewController {
-        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        return vc
-    }
-    
-    func updateUIViewController(_ uiViewController: UIViewControllerType, context: Context) {}
 }

@@ -35,105 +35,6 @@
 - [x] Photos view with grid layout
 - [x] Trash functionality with restore option
 - [x] Thumbnail generation for photos
-- [x] Soft delete support
-- [x] Permanent delete functionality
-- [x] Photo picker integration
-- [x] Multi-photo import support
-
-### UI/UX
-- [x] Modern SwiftUI interface
-- [x] Grid layout for documents
-- [x] Loading states and progress indicators
-- [x] Error alerts and user feedback
-- [x] Document details view
-- [x] Pull-to-refresh functionality
-- [x] Empty state handling
-- [x] Navigation improvements
-- [x] Tab-based navigation
-- [x] Context menus for file operations
-- [x] Photo grid layout
-- [x] Trash view with restore options
-
-## In Progress
-
-### Vault
-- [ ] Search functionality
-- [ ] Sort and filter options
-- [ ] Share functionality
-- [ ] Batch operations (delete, move, etc.)
-- [ ] Categories/folders for organization
-- [ ] Document preview functionality
-- [ ] Document metadata editing
-- [ ] Export functionality
-- [ ] Import from other apps
-- [ ] Thumbnail generation for documents
-- [ ] Video preview support
-- [ ] Audio playback support
-
-### UI/UX
-- [ ] Dark mode support
-- [ ] Accessibility improvements
-- [ ] Localization
-- [ ] Custom animations and transitions
-- [ ] Drag and drop support
-- [ ] Photo zoom and pan
-- [ ] Video player controls
-- [ ] Audio player controls
-
-### Feed
-- [ ] Story deletion functionality
-- [ ] Fix comment author name display
-- [ ] Comment editing
-- [ ] Rich text support in stories
-- [ ] Media attachment support
-
-## Planned Features
-
-### Vault
-- [ ] Sync across devices
-- [ ] Version history
-- [ ] Conflict resolution
-- [ ] Advanced search (OCR, metadata)
-- [ ] Tags and metadata
-- [ ] Collaboration features
-- [ ] Document scanning
-- [ ] Password protection for individual items
-- [ ] Secure notes
-- [ ] Automatic photo backup
-- [ ] Photo albums
-- [ ] Smart folders
-
-### Security
-- [ ] Two-factor authentication
-- [ ] Audit logging
-- [ ] Remote wipe
-- [ ] Secure sharing
-- [ ] Encryption key rotation
-- [ ] Security policy management
-- [ ] Firebase Storage security rules
-- [ ] Cloud backup encryption
-
-### UI/UX
-- [ ] Customizable themes
-- [ ] Widget support
-- [ ] Quick actions
-- [ ] Spotlight integration
-- [ ] Handoff support
-- [ ] Photo editing capabilities
-- [ ] Advanced photo filters
-- [ ] Photo organization tools
-
-## Known Issues
-1. Memory management during large file operations needs optimization
-2. UI responsiveness during heavy database operations
-3. Need better error messages for user feedback
-4. Authentication state management needs improvement
-5. Document picker state management needs refinement
-6. Thumbnail caching needs optimization
-7. Network error handling needs improvement
-8. Cloud storage sync needs better progress indicators
-9. Comments don't display current user's name correctly
-10. Story deletion functionality missing
 
 ## Recent Improvements
 1. Added Firebase Storage integration for cloud storage
@@ -168,3 +69,19 @@
 16. Add story deletion functionality
 17. Fix comment author name display
 18. Add comment editing capabilities
+
+## Vault Pending Optimizations
+1. Thumbnail caching
+2. Network error handling improvements
+3. Cloud storage sync indicators
+4. Batch operations for file management
+5. Enhanced search and filter options
+6. Advanced document preview capabilities
+7. Folder and category organization
+8. Enhanced sharing options
+9. Export/import functionality
+10. Video and audio preview support
+11. Photo editing tools
+12. Offline access and sync
+13. Security rule enhancements for Firebase Storage
+14. Improved user feedback for errors

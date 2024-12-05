@@ -179,4 +179,8 @@ class VaultEncryptionService {
         logger.debug("Generated hash: \(hashString)")
         return hashString
     }
+
+    func deleteEncryptionKey(keyId: String) {
+        encryptionKeys.removeValue(forKey: keyId)
+    }
 } 

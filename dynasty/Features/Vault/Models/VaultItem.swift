@@ -51,9 +51,9 @@ struct VaultItem: Identifiable, Codable {
     let encryptedFileName: String
     let storagePath: String
     let thumbnailURL: String?
-    let metadata: VaultItemMetadata
+    var metadata: VaultItemMetadata
     let createdAt: Date
-    let updatedAt: Date
+    var updatedAt: Date
     var isDeleted: Bool
     
     init(id: String, userId: String, title: String, description: String?, fileType: VaultItemType, 

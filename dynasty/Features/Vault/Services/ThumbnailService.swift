@@ -154,24 +154,28 @@ actor ThumbnailService {
     }
     
     private func generateVideoThumbnail(from data: Data) async throws -> UIImage {
-        let tempURL = try createTemporaryFile(with: data, mimeType: "video/mp4")
-        defer { try? fileManager.removeItem(at: tempURL) }
-        
-        let asset = AVAsset(url: tempURL)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = thumbnailSize
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: CMTime(seconds: 1, preferredTimescale: 60))]) { _, image, _, result, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else if let image = image, result == .succeeded {
-                    continuation.resume(returning: UIImage(cgImage: image))
-                } else {
-                    continuation.resume(throwing: ThumbnailError.thumbnailGenerationFailed)
+        do {
+            let tempURL = try createTemporaryFile(with: data, mimeType: "video/mp4")
+            defer { try? fileManager.removeItem(at: tempURL) }
+            
+            let asset = AVAsset(url: tempURL)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = thumbnailSize
+            
+            return try await withCheckedThrowingContinuation { continuation in
+                generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: CMTime(seconds: 1, preferredTimescale: 60))]) { _, image, _, result, error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else if let image = image, result == .succeeded {
+                        continuation.resume(returning: UIImage(cgImage: image))
+                    } else {
+                        continuation.resume(throwing: ThumbnailError.thumbnailGenerationFailed)
+                    }
                 }
             }
+        } catch {
+            throw ThumbnailError.thumbnailGenerationFailed
         }
     }
     

@@ -2,7 +2,7 @@ import SwiftUI
 import os.log
 
 struct TrashView: View {
-    @EnvironmentObject private var vaultManager: VaultManager
+    @EnvironmentObject var vaultManager: VaultManager
     @State private var selectedItem: VaultItem?
     @State private var showDetail = false
     @State private var showDeleteConfirmation = false
@@ -41,35 +41,37 @@ struct TrashView: View {
             }
         }
         .navigationTitle("Trash")
-        .sheet(isPresented: $showDetail, content: {
-            if let item = selectedItem {
-                VaultItemDetailView(document: item)
-            }
-        })
-        .alert("Delete Permanently?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
+        .confirmationDialog("Are you sure you want to permanently delete this item?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+            Button("Delete Permanently", role: .destructive) {
                 if let item = itemToDelete {
                     permanentlyDeleteItem(item)
                 }
             }
             Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This action cannot be undone.")
         }
         .alert("Error", isPresented: $showError, presenting: error) { _ in
             Button("OK", role: .cancel) {}
         } message: { error in
             Text(error.localizedDescription)
         }
+        .sheet(item: $selectedItem) { item in
+            VaultItemDetailView(document: item)
+                .environmentObject(vaultManager)
+        }
     }
     
     private func restoreItem(_ item: VaultItem) {
         Task {
             do {
+                logger.info("Attempting to restore item: \(item.id)")
                 try await vaultManager.restoreItem(item)
+                logger.info("Successfully restored item: \(item.id)")
             } catch {
-                self.error = error
-                self.showError = true
+                logger.error("Failed to restore item: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.error = error
+                    self.showError = true
+                }
             }
         }
     }
@@ -77,10 +79,15 @@ struct TrashView: View {
     private func permanentlyDeleteItem(_ item: VaultItem) {
         Task {
             do {
+                logger.info("Attempting to permanently delete item: \(item.id)")
                 try await vaultManager.permanentlyDeleteItem(item)
+                logger.info("Successfully permanently deleted item: \(item.id)")
             } catch {
-                self.error = error
-                self.showError = true
+                logger.error("Failed to permanently delete item: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.error = error
+                    self.showError = true
+                }
             }
         }
     }
