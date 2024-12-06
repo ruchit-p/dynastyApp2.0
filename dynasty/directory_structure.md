@@ -1,92 +1,97 @@
 # Dynasty App Directory Structure
 
-## Features/
-### Authentication/
-#### Services/
-- AuthManager.swift
-#### Views/
-- SignInView.swift
-- SignUpView.swift
+```
+dynasty/
+├── App/
+│   ├── AppDelegate.swift
+│   ├── DynastyApp.swift
+│   └── Persistence.swift
+│
+├── Core/
+│   ├── Components/
+│   │   ├── ShareSheet.swift
+│   │   └── PlusButtonModifier.swift
+│   ├── Extensions/
+│   │   └── UIImage+Extensions.swift
+│   ├── Helpers/
+│   │   └── KeychainHelper.swift
+│   ├── Navigation/
+│   │   └── ContentView.swift
+│   └── Utils/
+│
+├── Features/
+│   ├── Authentication/
+│   │   └── Services/
+│   │       └── AuthManager.swift
+│   ├── FamilyTree/
+│   ├── Feed/
+│   ├── HistoryBook/
+│   ├── Profile/
+│   └── Vault/
+│       ├── Extensions/
+│       ├── Models/
+│       │   └── VaultItem.swift
+│       ├── Services/
+│       │   ├── VaultManager.swift
+│       │   ├── DatabaseManager.swift
+│       │   ├── FirebaseStorageService.swift
+│       │   ├── VaultEncryptionService.swift
+│       │   └── ThumbnailService.swift
+│       └── Views/
+│           ├── VaultView.swift              # Main vault view with folder navigation
+│           ├── VaultContentView.swift       # Content grid view with folder support
+│           ├── VaultItemDetailView.swift    # Item detail view
+│           ├── VaultItemThumbnailView.swift # Thumbnail view for items and folders
+│           ├── TrashView.swift             # Trash management
+│           └── Components/
+│               ├── SearchFilterBar.swift
+│               ├── SelectionOverlay.swift
+│               ├── DocumentScannerView.swift
+│               ├── FolderNavigationBar.swift
+│               ├── FolderPathView.swift
+│               └── FolderCreationView.swift
+│
+├── Resources/
+│   ├── Assets.xcassets/
+│   └── Info.plist
+│
+└── Preview Content/
+    └── Preview Assets.xcassets/
+```
 
-### Vault/
-#### Models/
-- VaultItem.swift
-#### Services/
-- VaultManager.swift
-- VaultEncryptionService.swift
-- FirebaseStorageService.swift
-- DatabaseManager.swift
-- ThumbnailService.swift
-#### Views/
-- VaultView.swift
-- VaultItemDetailView.swift
-- TrashView.swift
+## Directory Overview
 
-### Profile/
-#### Models/
-- User.swift
+### App/
+Contains the main app entry points and core setup files.
 
-### FamilyTree/
-#### Models/
-- FamilyMember.swift
-- FamilyTree.swift
-- FamilyTreeNode.swift
-- RelationType.swift
-- Relationship.swift
-#### Services/
-- FamilyTreeManager.swift
-#### ViewModels/
-- FamilyTreeViewModel.swift
-#### Views/
-- AddFamilyMemberForm.swift
-- AdminManagementView.swift
-- Components/
-  - ConnectionLine.swift
-  - FamilyMemberNodeView.swift
-  - PlusButtonsOverlay.swift
-- FamilyTreeView.swift
-- FamilyTreeVisualization.swift
-- MemberSettingsView.swift
-- SendInvitationView.swift
+### Core/
+Houses reusable components, utilities, and helpers used across the app.
+- **Components/**: Reusable UI components
+- **Extensions/**: Swift extensions for added functionality
+- **Helpers/**: Helper utilities and functions
+- **Navigation/**: Navigation-related code
+- **Utils/**: General utility functions
 
-### Feed/
-#### Models/
-- Post.swift
-#### ViewModels/
-- FeedViewModel.swift
+### Features/
+Contains feature-specific modules, each in its own directory.
 
-## App/
-- AppDelegate.swift
-- DynastyApp.swift
-- Persistence.swift
+#### Vault/
+The secure storage feature module:
+- **Extensions/**: Vault-specific extensions
+- **Models/**: Data models for vault items and folders
+- **Services/**: Services for vault operations, including:
+  - VaultManager: Main vault management service
+  - DatabaseManager: Firestore database operations
+  - FirebaseStorageService: Cloud storage operations
+  - VaultEncryptionService: File encryption/decryption
+  - ThumbnailService: Thumbnail generation and caching
+- **Views/**: UI components and screens
+  - Main views for vault functionality with folder support
+  - Component views for specific UI elements
+  - New folder-related components
 
-## Core/
-### Components/
-- PlusButtonModifier.swift
-- ShareSheet.swift
-### Extensions/
-- Codable+Dictionary.swift
-### Helpers/
-- KeychainHelper.swift
-### Navigation/
-- ContentView.swift
-- MainTabView.swift
-### Utils/
-- Constants.swift
+### Resources/
+Contains app resources like assets and configuration files.
 
-## Resources/
-### Assets.xcassets/
-- AccentColor.colorset/
-- AppIcon.appiconset/
-- tree.imageset/
-- Contents.json
-- GoogleService-Info.plist
-- Info.plist
-- dynasty.entitlements
-### dynasty.xcdatamodeld/
-- .xccurrentversion
-- dynasty.xcdatamodel/
-
-## Project Status/
-- project_Status.txt
-- directory_structure.md
+### Preview Content/
+Contains preview assets for SwiftUI previews in Xcode.

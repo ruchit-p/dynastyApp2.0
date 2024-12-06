@@ -76,8 +76,9 @@ actor ThumbnailService {
                 thumbnail = try await self.generateVideoThumbnail(from: data)
             case .audio:
                 thumbnail = try await self.generateAudioThumbnail()
+            case .folder:
+                thumbnail = UIImage(systemName: "folder") ?? UIImage()
             }
-            
             // Cache the result if not cancelled
             if !Task.isCancelled {
                 await self.cacheResult(thumbnail, forKey: cacheKey)

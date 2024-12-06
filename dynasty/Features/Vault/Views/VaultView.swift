@@ -4,7 +4,6 @@ import PhotosUI
 import AVFoundation
 import VisionKit
 
-
 extension View {
     func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
@@ -19,6 +18,11 @@ struct VaultView: View {
     @State private var error: Error?
     @State private var showError = false
     @Environment(\.scenePhase) private var scenePhase
+    
+    // Add states for file handling
+    @State private var scannedImages: [UIImage] = []
+    @State private var scannedDocumentName = ""
+    @State private var currentFolderId: String? = nil
     
     private let logger = Logger(subsystem: "com.dynasty.VaultView", category: "UI")
     
@@ -86,7 +90,6 @@ struct VaultView: View {
     private func validateAndInitialize() {
         Task {
             do {
-                // Validate user session
                 try await authManager.validateSession()
                 
                 if let user = authManager.user, let userId = user.id {
@@ -135,7 +138,6 @@ struct VaultView: View {
             vaultManager.lock()
             logger.info("App moved to background. Vault locked.")
         case .active:
-            // When app becomes active, vault stays locked until user explicitly authenticates
             break
         @unknown default:
             break
@@ -172,7 +174,8 @@ struct VaultView: View {
                         filename: filename,
                         fileType: .image,
                         metadata: metadata,
-                        userId: userId
+                        userId: userId,
+                        parentFolderId: currentFolderId
                     )
                 }
             }
@@ -182,6 +185,62 @@ struct VaultView: View {
             await MainActor.run {
                 self.error = error
                 self.showError = true
+            }
+        }
+    }
+    
+    private func saveScannedDocumentAsPDF() async {
+        guard let userId = vaultManager.currentUser?.id else { return }
+        guard !scannedImages.isEmpty else { return }
+        
+        let pdfData = createPDFData(from: scannedImages)
+        
+        do {
+            let keyId = try await vaultManager.generateEncryptionKey(for: userId)
+            
+            let metadata = VaultItemMetadata(
+                originalFileName: scannedDocumentName.isEmpty ? "Untitled.pdf" : "\(scannedDocumentName).pdf",
+                fileSize: Int64(pdfData.count),
+                mimeType: "application/pdf",
+                encryptionKeyId: keyId,
+                hash: vaultManager.generateFileHash(for: pdfData)
+            )
+            
+            try await vaultManager.importData(
+                pdfData,
+                filename: UUID().uuidString + ".pdf",
+                fileType: .document,
+                metadata: metadata,
+                userId: userId,
+                parentFolderId: currentFolderId
+            )
+            
+            scannedImages.removeAll()
+            scannedDocumentName = ""
+        } catch {
+            self.error = error
+            self.showError = true
+        }
+    }
+    
+    private func createPDFData(from images: [UIImage]) -> Data {
+        let pdfMetaData = [
+            kCGPDFContextCreator: "DynastyApp",
+            kCGPDFContextAuthor: "DynastyApp"
+        ]
+        let format = UIGraphicsPDFRendererFormat()
+        format.documentInfo = pdfMetaData as [String: Any]
+        
+        let pageWidth: CGFloat = 595.2 // A4 width in points
+        let pageHeight: CGFloat = 841.8 // A4 height in points
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight), format: format)
+        
+        return renderer.pdfData { (context) in
+            for image in images {
+                context.beginPage()
+                let maxRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
+                let aspectRect = AVMakeRect(aspectRatio: image.size, insideRect: maxRect)
+                image.draw(in: aspectRect)
             }
         }
     }
@@ -218,235 +277,32 @@ struct VaultSignInRequiredView: View {
 struct VaultContentView: View {
     @EnvironmentObject var vaultManager: VaultManager
     @Binding var selectedPhotos: [PhotosPickerItem]
+    var currentFolderId: String? = nil
+    
     @State private var searchText = ""
     @State private var selectedType: VaultItemType?
     @State private var showFilePicker = false
     @State private var showPhotoPickerSheet = false
     @State private var showCameraScannerSheet = false
-    @State private var showTrashView = false
+    @State private var showTrashScreen = false
     @State private var error: Error?
     @State private var showError = false
     @State private var isSelecting = false
     @State private var selectedItems = Set<VaultItem>()
+    @State private var showShareSheet = false
+    @State private var shareSheetItems: [URL] = []
+    
+    // New states for prompts
+    @State private var showNewFolderPrompt = false
+    @State private var newFolderName = ""
+    @State private var showScannedDocumentNamePrompt = false
+    @State private var scannedDocumentName = ""
+    @State private var scannedImages: [UIImage] = []
     
     private let logger = Logger(subsystem: "com.dynasty.VaultContentView", category: "UI")
     private let columns = [
         GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 16)
     ]
-    
-    private var filteredItems: [VaultItem] {
-        vaultManager.items.filter { item in
-            guard !item.isDeleted else { return false }
-            
-            let matchesSearch = searchText.isEmpty || 
-                item.title.localizedCaseInsensitiveContains(searchText) ||
-                (item.description?.localizedCaseInsensitiveContains(searchText) ?? false)
-            
-            let matchesType = selectedType == nil || item.fileType == selectedType
-            
-            return matchesSearch && matchesType
-        }
-        .sorted { $0.updatedAt > $1.updatedAt }
-    }
-    
-    var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            VStack(spacing: 0) {
-                // Top Header
-                HStack {
-                    Text("Vault")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    Spacer()
-                    Text("\(filteredItems.count) Items")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                    
-                    if !isSelecting {
-                        Menu {
-                            Button("Select") {
-                                isSelecting = true
-                            }
-                            Button("New Folder") {
-                                // TODO: Implement folder creation
-                            }
-                            Button("Scan Documents") {
-                                showCameraScannerSheet = true
-                            }
-                            Button("View Trash") {
-                                showTrashView = true
-                            }
-                            
-                     
-                            
-                            Menu("Filter/Sort") {
-                                Button("Name") {
-                                    // Implement sort by name
-                                }
-                                Button("Kind") {
-                                    // Implement sort by kind
-                                }
-                                Button("Date") {
-                                    // Implement sort by date
-                                }
-                                Button("Size") {
-                                    // Implement sort by size
-                                }
-                                Button("Tags") {
-                                    // Implement sort by tags
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title2)
-                                .padding(.leading, 8)
-                        }
-                        .padding(.trailing)
-                    } else {
-                        Menu {
-                            Button("Download") {
-                                downloadSelectedItems()
-                            }
-                            Button("Share") {
-                                shareSelectedItems()
-                            }
-                            Button("Delete") {
-                                deleteSelectedItems()
-                            }
-                            Button("Cancel Selection") {
-                                isSelecting = false
-                                selectedItems.removeAll()
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title2)
-                                .padding(.leading, 8)
-                        }
-                        .padding(.trailing)
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.top, 20)
-                
-                // Search and Filter Bar
-                SearchFilterBar(searchText: $searchText, selectedType: $selectedType)
-                
-                // Vertical Grid Layout
-                if filteredItems.isEmpty {
-                    VStack {
-                        Spacer()
-                        Text("No items yet")
-                            .font(.headline)
-                            .foregroundColor(.gray)
-                        Text("Add your first item by clicking the plus button!")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                        Spacer()
-                    }
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(filteredItems) { item in
-                                NavigationLink(destination: VaultItemDetailView(document: item)) {
-                                    VStack(spacing: 8) {
-                                        VaultItemThumbnailView(item: item)
-                                            .frame(height: 150)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                                            .overlay(
-                                                isSelecting ? SelectionOverlay(isSelected: selectedItems.contains(item)) {
-                                                    toggleSelection(for: item)
-                                                } : nil
-                                            )
-                                        
-                                        Text(item.title)
-                                            .font(.caption)
-                                            .lineLimit(1)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .onTapGesture {
-                                    if isSelecting {
-                                        toggleSelection(for: item)
-                                    }
-                                }
-                            }
-                        }
-                        .padding()
-                    }
-                    .refreshable {
-                        await refreshItems()
-                    }
-                }
-            }
-            
-            // Add Button Menu
-            Menu {
-                Button {
-                    showPhotoPickerSheet = true
-                } label: {
-                    Label("Upload from Photos", systemImage: "photo.on.rectangle")
-                }
-                
-                Button {
-                    showFilePicker = true
-                } label: {
-                    Label("Upload from Files", systemImage: "folder")
-                }
-                
-                Button {
-                    showCameraScannerSheet = true
-                } label: {
-                    Label("Scan Documents", systemImage: "camera")
-                }
-            } label: {
-                Image(systemName: "plus")
-                    .foregroundColor(.white)
-                    .padding()
-                    .background(Color.green)
-                    .clipShape(Circle())
-                    .shadow(radius: 5)
-            }
-            .padding(.trailing, 20)
-            .padding(.bottom, 20)
-        }
-        .navigationBarHidden(true)
-        .fileImporter(
-            isPresented: $showFilePicker,
-            allowedContentTypes: [.pdf, .plainText, .image, .video],
-            allowsMultipleSelection: true
-        ) { result in
-            handleFileImport(result)
-        }
-        .sheet(isPresented: $showPhotoPickerSheet) {
-            PhotosPicker(
-                selection: $selectedPhotos,
-                matching: .images,
-                photoLibrary: .shared()
-            ) {
-                Text("Select Photos")
-            }
-        }
-        .sheet(isPresented: $showCameraScannerSheet) {
-            DocumentScannerView { scannedImages in
-                handleScannedDocuments(scannedImages)
-            }
-        }
-        .sheet(isPresented: $showTrashView) {
-            TrashView()
-        }
-        .alert("Error", isPresented: $showError, presenting: error) { _ in
-            Button("OK", role: .cancel) {}
-        } message: { error in
-            Text(error.localizedDescription)
-        }
-        .gesture(
-            TapGesture()
-                .onEnded { _ in
-                    hideKeyboard()
-                }
-        )
-    }
     
     private func handleFileImport(_ result: Result<[URL], Error>) {
         switch result {
@@ -454,7 +310,7 @@ struct VaultContentView: View {
             Task {
                 do {
                     guard let userId = vaultManager.currentUser?.id else { return }
-                    try await vaultManager.importItems(from: urls, userId: userId)
+                    try await vaultManager.importItems(from: urls, userId: userId, parentFolderId: currentFolderId)
                 } catch {
                     logger.error("Failed to import files: \(error)")
                     await MainActor.run {
@@ -472,6 +328,227 @@ struct VaultContentView: View {
         }
     }
     
+    private var filteredItems: [VaultItem] {
+        vaultManager.items.filter { item in
+            guard !item.isDeleted else { return false }
+            
+            // Filter by current folder
+            if let folderId = currentFolderId {
+                guard item.parentFolderId == folderId else { return false }
+            } else {
+                guard item.parentFolderId == nil else { return false }
+            }
+            
+            let matchesSearch = searchText.isEmpty || 
+                item.title.localizedCaseInsensitiveContains(searchText) ||
+                (item.description?.localizedCaseInsensitiveContains(searchText) ?? false)
+            
+            let matchesType = selectedType == nil || item.fileType == selectedType
+            
+            return matchesSearch && matchesType
+        }
+        .sorted { $0.updatedAt > $1.updatedAt }
+    }
+    
+    // Add computed property for current folder name
+    private var currentFolderName: String? {
+        guard let folderId = currentFolderId,
+              let folderItem = vaultManager.items.first(where: { $0.id == folderId && $0.fileType == .folder }) else {
+            return nil
+        }
+        return folderItem.title
+    }
+    
+    var body: some View {
+        NavigationView {
+            ZStack(alignment: .bottomTrailing) {
+                VStack(spacing: 0) {
+                    // Search and Filter Bar
+                    SearchFilterBar(searchText: $searchText, selectedType: $selectedType)
+                    
+                    if filteredItems.isEmpty {
+                        VStack {
+                            Spacer()
+                            Text("No items yet")
+                                .font(.headline)
+                                .foregroundColor(.gray)
+                            Text("Add your first item by tapping the plus button!")
+                                .font(.subheadline)
+                                .foregroundColor(.gray)
+                            Spacer()
+                        }
+                    } else {
+                        // Keep your existing ScrollView and grid layout
+                        ScrollView {
+                            LazyVGrid(columns: columns, spacing: 16) {
+                                ForEach(filteredItems) { item in
+                                    // Keep your existing item view code
+                                    if isSelecting {
+                                        VStack(spacing: 8) {
+                                            VaultItemThumbnailView(item: item)
+                                                .frame(height: 150)
+                                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                                .overlay(
+                                                    SelectionOverlay(isSelected: selectedItems.contains(item)) {
+                                                        toggleSelection(for: item)
+                                                    }
+                                                )
+                                            Text(item.title)
+                                                .font(.caption)
+                                                .lineLimit(1)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            toggleSelection(for: item)
+                                        }
+                                    } else {
+                                        if item.fileType == .folder {
+                                            NavigationLink(destination: VaultContentView(selectedPhotos: $selectedPhotos, currentFolderId: item.id)) {
+                                                VStack(spacing: 8) {
+                                                    VaultItemThumbnailView(item: item)
+                                                        .frame(height: 150)
+                                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                                    Text(item.title)
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                                }
+                                            }
+                                            .buttonStyle(PlainButtonStyle())
+                                        } else {
+                                            NavigationLink(destination: VaultItemDetailView(document: item)) {
+                                                VStack(spacing: 8) {
+                                                    VaultItemThumbnailView(item: item)
+                                                        .frame(height: 150)
+                                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                                    Text(item.title)
+                                                        .font(.caption)
+                                                        .lineLimit(1)
+                                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                                }
+                                            }
+                                            .buttonStyle(PlainButtonStyle())
+                                        }
+                                    }
+                                }
+                            }
+                            .padding()
+                        }
+                        .refreshable {
+                            await refreshItems()
+                        }
+                    }
+                }
+                
+                // Keep your existing plus button menu
+                Menu {
+                    Button {
+                        showPhotoPickerSheet = true
+                    } label: {
+                        Label("Upload from Photos", systemImage: "photo.on.rectangle")
+                    }
+                    
+                    Button {
+                        showFilePicker = true
+                    } label: {
+                        Label("Upload from Files", systemImage: "folder")
+                    }
+                    
+                    Button {
+                        showCameraScannerSheet = true
+                    } label: {
+                        Label("Scan Documents", systemImage: "camera")
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.green)
+                        .clipShape(Circle())
+                        .shadow(radius: 5)
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
+            }
+            .navigationTitle(currentFolderName ?? "Vault")
+            .navigationBarTitleDisplayMode(currentFolderId == nil ? .large : .inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    HStack {
+                        Text("\(filteredItems.count) Items")
+                            .font(.footnote)
+                            .foregroundColor(.gray)
+                        if !isSelecting {
+                            Menu {
+                                Button("Select") {
+                                    isSelecting = true
+                                }
+                                Button("New Folder") {
+                                    showNewFolderPrompt = true
+                                }
+                                NavigationLink(destination: TrashView()) {
+                                    Text("View Trash")
+                                }
+                                Menu("Filter/Sort") {
+                                    Button("Name") {}
+                                    Button("Kind") {}
+                                    Button("Date") {}
+                                    Button("Size") {}
+                                    Button("Tags") {}
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.title2)
+                            }
+                        } else {
+                            Menu {
+                                Button("Select All") {
+                                    for item in filteredItems {
+                                        selectedItems.insert(item)
+                                    }
+                                }
+                                if !selectedItems.isEmpty {
+                                    Button("Download") {
+                                        downloadSelectedItems()
+                                    }
+                                    Button("Share") {
+                                        shareSelectedItems()
+                                    }
+                                    Button("Delete") {
+                                        deleteSelectedItems()
+                                    }
+                                }
+                                Button("Cancel Selection") {
+                                    isSelecting = false
+                                    selectedItems.removeAll()
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.title2)
+                            }
+                        }
+                    }
+                }
+            }
+            // Keep your existing modifiers and sheets
+            .fileImporter(
+                isPresented: $showFilePicker,
+                allowedContentTypes: [.pdf, .plainText, .image, .video],
+                allowsMultipleSelection: true
+            ) { result in
+                handleFileImport(result)
+            }
+            .photosPicker(
+                isPresented: $showPhotoPickerSheet,
+                selection: $selectedPhotos,
+                matching: .any(of: [.images, .videos])
+            )
+            // ... other modifiers
+        }
+        .navigationViewStyle(StackNavigationViewStyle())
+    }
+    
     private func toggleSelection(for item: VaultItem) {
         if selectedItems.contains(item) {
             selectedItems.remove(item)
@@ -481,11 +558,53 @@ struct VaultContentView: View {
     }
     
     private func downloadSelectedItems() {
-        // Implement download logic for selected items
+        Task {
+            do {
+                var tempFiles: [URL] = []
+                for item in selectedItems {
+                    let data = try await vaultManager.downloadFile(item)
+                    let tempURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(item.title)
+                    try data.write(to: tempURL, options: .atomic)
+                    tempFiles.append(tempURL)
+                }
+                
+                await MainActor.run {
+                    self.shareSheetItems = tempFiles
+                    self.showShareSheet = true
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = error
+                    self.showError = true
+                }
+            }
+        }
     }
     
     private func shareSelectedItems() {
-        // Implement share logic for selected items
+        Task {
+            do {
+                var tempFiles: [URL] = []
+                for item in selectedItems {
+                    let data = try await vaultManager.downloadFile(item)
+                    let tempURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(item.title)
+                    try data.write(to: tempURL, options: .atomic)
+                    tempFiles.append(tempURL)
+                }
+                
+                await MainActor.run {
+                    self.shareSheetItems = tempFiles
+                    self.showShareSheet = true
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = error
+                    self.showError = true
+                }
+            }
+        }
     }
     
     private func deleteSelectedItems() {
@@ -816,6 +935,8 @@ struct VaultItemView: View {
             return "video"
         case .audio:
             return "music.note"
+        case .folder:
+            return "folder"
         }
     }
     
@@ -852,6 +973,11 @@ struct VaultItemView: View {
                         self.thumbnail = UIImage(systemName: "waveform")?.resize(to: CGSize(width: 150, height: 150))
                         self.isLoading = false
                     }
+                case .folder:
+                    await MainActor.run {
+                        self.thumbnail = UIImage(systemName: "folder")?.resize(to: CGSize(width: 150, height: 150))
+                        self.isLoading = false
+                    }
                 }
             } catch {
                 logger.error("Failed to load thumbnail for item \(item.id): \(error.localizedDescription)")
@@ -882,15 +1008,6 @@ struct VaultItemView: View {
             try? FileManager.default.removeItem(at: tempURL)
             logger.error("Failed to generate video thumbnail: \(error.localizedDescription)")
             return nil
-        }
-    }
-}
-
-extension UIImage {
-    func resize(to size: CGSize) -> UIImage {
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
-            self.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }

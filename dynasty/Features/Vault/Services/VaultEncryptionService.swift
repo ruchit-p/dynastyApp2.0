@@ -29,7 +29,7 @@ enum VaultEncryptionError: Error {
 }
 
 class VaultEncryptionService {
-    private let keychainHelper: KeychainHelper
+    let keychainHelper: KeychainHelper
     private var encryptionKeys: [String: SymmetricKey] = [:]
     private let logger = Logger(subsystem: "com.dynasty.VaultEncryptionService", category: "Encryption")
     
@@ -41,25 +41,32 @@ class VaultEncryptionService {
         let key = SymmetricKey(size: .bits256)
         let id = UUID().uuidString
         encryptionKeys[id] = key
+        
+        do {
+            try keychainHelper.storeEncryptionKey(key, for: id)
+            logger.info("Successfully stored encryption key \(id) in Keychain")
+        } catch {
+            logger.error("Failed to store encryption key \(id) in Keychain: \(error.localizedDescription)")
+        }
+        
         return (key, id)
     }
     
     func encryptFile(data: Data, userId: String, keyId: String) throws -> Data {
         logger.info("Encrypting file for user: \(userId) with key: \(keyId)")
         
-        // Validate input data
         guard !data.isEmpty else {
             logger.error("Attempted to encrypt empty data")
             throw VaultEncryptionError.invalidData("Empty data")
         }
         
-        // Get encryption key
         let key: SymmetricKey
         do {
             if let cachedKey = encryptionKeys[keyId] {
                 key = cachedKey
             } else {
-                key = try keychainHelper.loadEncryptionKey(for: keyId)
+                let keyData = try keychainHelper.loadEncryptionKey(for: keyId)
+                key = SymmetricKey(data: keyData)
                 encryptionKeys[keyId] = key
             }
         } catch {
@@ -68,9 +75,7 @@ class VaultEncryptionService {
         }
         
         do {
-            // AES.GCM.seal without providing nonce generates one for us
             let sealedBox = try AES.GCM.seal(data, using: key)
-            
             guard let combined = sealedBox.combined else {
                 logger.error("Failed to combine encrypted data")
                 throw VaultEncryptionError.encryptionFailed("Failed to combine encrypted data")
@@ -90,19 +95,18 @@ class VaultEncryptionService {
     func decryptFile(encryptedData: Data, userId: String, keyId: String) throws -> Data {
         logger.info("Decrypting file for user: \(userId) with key: \(keyId)")
         
-        // Validate input data
         guard !encryptedData.isEmpty else {
             logger.error("Attempted to decrypt empty data")
             throw VaultEncryptionError.invalidData("Empty encrypted data")
         }
         
-        // Get encryption key
         let key: SymmetricKey
         do {
             if let cachedKey = encryptionKeys[keyId] {
                 key = cachedKey
             } else {
-                key = try keychainHelper.loadEncryptionKey(for: keyId)
+                let keyData = try keychainHelper.loadEncryptionKey(for: keyId)
+                key = SymmetricKey(data: keyData)
                 encryptionKeys[keyId] = key
             }
         } catch {
@@ -111,7 +115,6 @@ class VaultEncryptionService {
         }
         
         do {
-            // Decrypt using combined sealed box data
             let sealedBox = try AES.GCM.SealedBox(combined: encryptedData)
             let decryptedData = try AES.GCM.open(sealedBox, using: key)
             

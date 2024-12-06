@@ -5,6 +5,7 @@ enum VaultItemType: String, Codable {
     case image
     case video
     case audio
+    case folder
     
     var maxFileSize: Int64 {
         switch self {
@@ -16,6 +17,8 @@ enum VaultItemType: String, Codable {
             return 500 * 1024 * 1024 // 500MB
         case .audio:
             return 100 * 1024 * 1024 // 100MB
+        case .folder:
+            return 0 // Folders don't have a file size
         }
     }
     
@@ -29,6 +32,8 @@ enum VaultItemType: String, Codable {
             return ["video/mp4", "video/quicktime"]
         case .audio:
             return ["audio/mpeg", "audio/mp4", "audio/x-m4a"]
+        case .folder:
+            return ["application/vnd.folder"]
         }
     }
 }
@@ -44,7 +49,7 @@ struct VaultItemMetadata: Codable {
 struct VaultItem: Identifiable, Codable, Hashable {
     let id: String
     let userId: String
-    let title: String
+    var title: String
     let description: String?
     let fileType: VaultItemType
     let encryptedFileName: String
@@ -54,10 +59,11 @@ struct VaultItem: Identifiable, Codable, Hashable {
     let createdAt: Date
     var updatedAt: Date
     var isDeleted: Bool
+    let parentFolderId: String?
     
     init(id: String, userId: String, title: String, description: String?, fileType: VaultItemType, 
          encryptedFileName: String, storagePath: String, thumbnailURL: String?, metadata: VaultItemMetadata, 
-         createdAt: Date, updatedAt: Date, isDeleted: Bool = false) {
+         createdAt: Date, updatedAt: Date, isDeleted: Bool = false, parentFolderId: String? = nil) {
         self.id = id
         self.userId = userId
         self.title = title
@@ -70,6 +76,7 @@ struct VaultItem: Identifiable, Codable, Hashable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.isDeleted = isDeleted
+        self.parentFolderId = parentFolderId
     }
 }
 
