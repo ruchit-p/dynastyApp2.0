@@ -76,26 +76,27 @@ class VaultManager: ObservableObject {
     private var lockUntil: Date?
     
     private init() {
-        self.encryptionService = VaultEncryptionService()
+        self.encryptionService = VaultEncryptionService(keychainHelper: KeychainHelper.shared)
         self.storageService = FirebaseStorageService.shared
         logger.info("VaultManager initialized")
     }
     
     // MARK: - Public Methods
     
-    // Public method for encryption key generation
+    // Single implementation of generateEncryptionKey
     func generateEncryptionKey(for userId: String) throws -> String {
-        return try encryptionService.generateEncryptionKey(for: userId)
+        let (_, keyId) = encryptionService.generateEncryptionKey()
+        return keyId
     }
     
     // Public method for file encryption
-    func encryptFile(data: Data, userId: String, keyId: String) throws -> (Data, Data) {
+    func encryptFile(data: Data, userId: String, keyId: String) throws -> Data {
         return try encryptionService.encryptFile(data: data, userId: userId, keyId: keyId)
     }
     
     // Public method for file decryption
-    func decryptFile(encryptedData: Data, userId: String, keyId: String, iv: Data) throws -> Data {
-        return try encryptionService.decryptFile(encryptedData: encryptedData, userId: userId, keyId: keyId, iv: iv)
+    func decryptFile(encryptedData: Data, userId: String, keyId: String) throws -> Data {
+        return try encryptionService.decryptFile(encryptedData: encryptedData, userId: userId, keyId: keyId)
     }
     
     func setCurrentUser(_ user: User?) {
@@ -132,7 +133,7 @@ class VaultManager: ObservableObject {
         context.localizedReason = "Authenticate to access your secure vault"
         
         do {
-            let success = try await withCheckedThrowingContinuation { continuation in
+            try await withCheckedThrowingContinuation { continuation in
                 context.evaluatePolicy(.deviceOwnerAuthentication, 
                                     localizedReason: "Access your vault") { success, error in
                     if success {
@@ -182,7 +183,6 @@ class VaultManager: ObservableObject {
         
         // Once authenticated, proceed with vault unlocking
         do {
-            try await encryptionService.initialize()
             try await dbManager.openDatabase(for: userId)
             try await loadItems(for: userId)
             isLocked = false
@@ -228,11 +228,11 @@ class VaultManager: ObservableObject {
                 from: item.storagePath
             )
             
-            let decryptedData = try self.encryptionService.decryptFile(
+            // Decrypt directly from the combined data
+            let decryptedData = try await self.encryptionService.decryptFile(
                 encryptedData: encryptedData,
                 userId: item.userId,
-                keyId: item.metadata.encryptionKeyId,
-                iv: item.metadata.iv
+                keyId: item.metadata.encryptionKeyId
             )
             
             let fileHash = encryptionService.generateFileHash(for: decryptedData)
@@ -279,8 +279,6 @@ class VaultManager: ObservableObject {
         
         do {
             try await storageService.deleteFile(at: item.storagePath)
-            try self.encryptionService.deleteEncryptionKey(keyId: item.metadata.encryptionKeyId)
-            
             self.items.removeAll(where: { $0.id == item.id })
             try await dbManager.deleteItem(item, for: userId)
             
@@ -292,10 +290,6 @@ class VaultManager: ObservableObject {
     }
     
     // Public methods for encryption service functionality
-    func generateEncryptionKey(for userId: String) async throws -> String {
-        return try await encryptionService.generateEncryptionKey(for: userId)
-    }
-    
     func generateFileHash(for data: Data) -> String {
         return encryptionService.generateFileHash(for: data)
     }
@@ -314,23 +308,20 @@ class VaultManager: ObservableObject {
         logger.info("Importing data with filename: \(filename)")
         
         do {
-            let (encryptedData, iv) = try encryptionService.encryptFile(
+            let encryptedData = try encryptionService.encryptFile(
                 data: data,
                 userId: userId,
                 keyId: metadata.encryptionKeyId
             )
             
-            // Cache encrypted data locally
-            let cacheURL = try cacheEncryptedData(encryptedData, filename: filename)
+            // Cache encrypted data locally but ignore the returned URL since we don't need it
+            _ = try cacheEncryptedData(encryptedData, filename: filename)
             
             let storagePath = try await storageService.uploadEncryptedData(
                 encryptedData,
                 fileName: filename,
                 userId: userId
             )
-            
-            var updatedMetadata = metadata
-            updatedMetadata.iv = iv
             
             let item = VaultItem(
                 id: UUID().uuidString,
@@ -341,7 +332,7 @@ class VaultManager: ObservableObject {
                 encryptedFileName: filename,
                 storagePath: storagePath,
                 thumbnailURL: nil,
-                metadata: updatedMetadata,
+                metadata: metadata,
                 createdAt: Date(),
                 updatedAt: Date(),
                 isDeleted: false
@@ -365,18 +356,27 @@ class VaultManager: ObservableObject {
         
         logger.info("Importing file from URL: \(url)")
         
+        // Request access to the security-scoped resource
+        guard url.startAccessingSecurityScopedResource() else {
+            logger.error("Failed to access security scoped resource: \(url)")
+            throw VaultError.fileOperationFailed("No permission to access the file.")
+        }
+        
+        defer {
+            url.stopAccessingSecurityScopedResource()
+        }
+        
         do {
             let fileData = try Data(contentsOf: url)
             let fileType = determineFileType(from: url)
             let mimeType = determineMimeType(from: url)
-            let keyId = try encryptionService.generateEncryptionKey(for: userId)
+            let keyId = try generateEncryptionKey(for: userId)
             
             let metadata = VaultItemMetadata(
                 originalFileName: url.lastPathComponent,
                 fileSize: Int64(fileData.count),
                 mimeType: mimeType,
                 encryptionKeyId: keyId,
-                iv: Data(),
                 hash: encryptionService.generateFileHash(for: fileData)
             )
             

@@ -38,7 +38,6 @@ struct VaultItemMetadata: Codable {
     let fileSize: Int64
     let mimeType: String
     let encryptionKeyId: String
-    var iv: Data
     let hash: String
 }
 

@@ -1,21 +1,17 @@
 import Foundation
 import CryptoKit
-import LocalAuthentication
 import os.log
 
-enum VaultEncryptionError: LocalizedError {
-    case keyGenerationFailed(String)
+enum VaultEncryptionError: Error {
+    case keyNotFound(String)
     case encryptionFailed(String)
     case decryptionFailed(String)
-    case keyNotFound(String)
     case invalidData(String)
     case fileIntegrityCompromised
     case keychainError(String)
     
     var errorDescription: String? {
         switch self {
-        case .keyGenerationFailed(let reason):
-            return "Failed to generate encryption key: \(reason)"
         case .encryptionFailed(let reason):
             return "Failed to encrypt data: \(reason)"
         case .decryptionFailed(let reason):
@@ -33,55 +29,22 @@ enum VaultEncryptionError: LocalizedError {
 }
 
 class VaultEncryptionService {
-    static let shared = VaultEncryptionService()
-    
+    private let keychainHelper: KeychainHelper
     private var encryptionKeys: [String: SymmetricKey] = [:]
-    private let keychainHelper = KeychainHelper.shared
     private let logger = Logger(subsystem: "com.dynasty.VaultEncryptionService", category: "Encryption")
     
-    init() {
-        logger.info("VaultEncryptionService initialized")
+    init(keychainHelper: KeychainHelper) {
+        self.keychainHelper = keychainHelper
     }
     
-    func initialize() async throws {
-        logger.info("Initializing encryption service")
-        do {
-            let existingKeys = try keychainHelper.loadEncryptionKeys()
-            encryptionKeys = existingKeys
-            logger.info("Successfully loaded \(existingKeys.count) encryption keys")
-        } catch {
-            logger.error("Failed to load encryption keys: \(error.localizedDescription)")
-            throw VaultEncryptionError.keychainError(error.localizedDescription)
-        }
+    func generateEncryptionKey() -> (key: SymmetricKey, id: String) {
+        let key = SymmetricKey(size: .bits256)
+        let id = UUID().uuidString
+        encryptionKeys[id] = key
+        return (key, id)
     }
     
-    func clearKeys() {
-        logger.info("Clearing encryption keys from memory")
-        encryptionKeys.removeAll()
-    }
-    
-    func generateEncryptionKey(for userId: String) throws -> String {
-        logger.info("Generating new encryption key for user: \(userId)")
-        
-        do {
-            let key = SymmetricKey(size: .bits256)
-            let keyId = UUID().uuidString
-            
-            // Store key in memory
-            encryptionKeys[keyId] = key
-            
-            // Store key in keychain
-            try keychainHelper.storeEncryptionKey(key, for: keyId)
-            
-            logger.info("Successfully generated and stored encryption key: \(keyId)")
-            return keyId
-        } catch {
-            logger.error("Failed to generate encryption key: \(error.localizedDescription)")
-            throw VaultEncryptionError.keyGenerationFailed(error.localizedDescription)
-        }
-    }
-    
-    func encryptFile(data: Data, userId: String, keyId: String) throws -> (encryptedData: Data, iv: Data) {
+    func encryptFile(data: Data, userId: String, keyId: String) throws -> Data {
         logger.info("Encrypting file for user: \(userId) with key: \(keyId)")
         
         // Validate input data
@@ -105,12 +68,8 @@ class VaultEncryptionService {
         }
         
         do {
-            // Generate random IV
-            let iv = Data((0..<12).map { _ in UInt8.random(in: 0...255) })
-            let nonce = try AES.GCM.Nonce(data: iv)
-            
-            // Encrypt data
-            let sealedBox = try AES.GCM.seal(data, using: key, nonce: nonce)
+            // AES.GCM.seal without providing nonce generates one for us
+            let sealedBox = try AES.GCM.seal(data, using: key)
             
             guard let combined = sealedBox.combined else {
                 logger.error("Failed to combine encrypted data")
@@ -118,7 +77,7 @@ class VaultEncryptionService {
             }
             
             logger.info("Successfully encrypted file: \(combined.count) bytes")
-            return (combined, iv)
+            return combined
         } catch let error as VaultEncryptionError {
             logger.error("Encryption failed with VaultEncryptionError: \(error.localizedDescription)")
             throw error
@@ -128,18 +87,13 @@ class VaultEncryptionService {
         }
     }
     
-    func decryptFile(encryptedData: Data, userId: String, keyId: String, iv: Data) throws -> Data {
+    func decryptFile(encryptedData: Data, userId: String, keyId: String) throws -> Data {
         logger.info("Decrypting file for user: \(userId) with key: \(keyId)")
         
         // Validate input data
         guard !encryptedData.isEmpty else {
             logger.error("Attempted to decrypt empty data")
             throw VaultEncryptionError.invalidData("Empty encrypted data")
-        }
-        
-        guard !iv.isEmpty else {
-            logger.error("Invalid IV: empty")
-            throw VaultEncryptionError.invalidData("Empty IV")
         }
         
         // Get encryption key
@@ -157,7 +111,7 @@ class VaultEncryptionService {
         }
         
         do {
-            let nonce = try AES.GCM.Nonce(data: iv)
+            // Decrypt using combined sealed box data
             let sealedBox = try AES.GCM.SealedBox(combined: encryptedData)
             let decryptedData = try AES.GCM.open(sealedBox, using: key)
             
@@ -173,14 +127,7 @@ class VaultEncryptionService {
     }
     
     func generateFileHash(for data: Data) -> String {
-        logger.debug("Generating file hash")
         let hash = SHA256.hash(data: data)
-        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
-        logger.debug("Generated hash: \(hashString)")
-        return hashString
-    }
-
-    func deleteEncryptionKey(keyId: String) {
-        encryptionKeys.removeValue(forKey: keyId)
+        return hash.compactMap { String(format: "%02x", $0) }.joined()
     }
 } 

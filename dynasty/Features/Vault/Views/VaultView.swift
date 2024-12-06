@@ -164,7 +164,6 @@ struct VaultView: View {
                         fileSize: Int64(data.count),
                         mimeType: "image/jpeg",
                         encryptionKeyId: encryptionKeyId,
-                        iv: Data(),
                         hash: vaultManager.generateFileHash(for: data)
                     )
                     
