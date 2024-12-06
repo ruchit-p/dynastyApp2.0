@@ -42,7 +42,7 @@ struct VaultItemMetadata: Codable {
     let hash: String
 }
 
-struct VaultItem: Identifiable, Codable {
+struct VaultItem: Identifiable, Codable, Hashable {
     let id: String
     let userId: String
     let title: String
@@ -71,5 +71,15 @@ struct VaultItem: Identifiable, Codable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.isDeleted = isDeleted
+    }
+}
+
+extension VaultItem {
+    static func == (lhs: VaultItem, rhs: VaultItem) -> Bool {
+        return lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
 } 

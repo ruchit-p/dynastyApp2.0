@@ -2,6 +2,15 @@ import SwiftUI
 import os.log
 import PhotosUI
 import AVFoundation
+import VisionKit
+
+
+extension View {
+    func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                     to: nil, from: nil, for: nil)
+    }
+}
 
 struct VaultView: View {
     @EnvironmentObject private var vaultManager: VaultManager
@@ -15,14 +24,37 @@ struct VaultView: View {
     
     var body: some View {
         Group {
-            if let user = authManager.user {
+            if let user = authManager.user, let userId = user.id {
                 if vaultManager.isLocked {
-                    LockScreenView(
-                        isAuthenticating: vaultManager.isAuthenticating,
-                        onAuthenticate: authenticate,
-                        biometricLabel: getBiometricButtonLabel(),
-                        biometricIcon: getBiometricButtonIcon()
-                    )
+                    VStack {
+                        Text("Vault is Locked")
+                            .font(.title2)
+                            .padding()
+                        
+                        Text("Press the button below to authenticate with Face ID or passcode.")
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                        
+                        Button(action: {
+                            Task {
+                                do {
+                                    try await vaultManager.unlock()
+                                } catch {
+                                    self.error = error
+                                    self.showError = true
+                                }
+                            }
+                        }) {
+                            Label("Authenticate to Unlock", systemImage: getBiometricButtonIcon())
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.blue)
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
+                                .padding(.horizontal)
+                        }
+                        .disabled(vaultManager.isAuthenticating)
+                    }
                 } else {
                     VaultContentView(selectedPhotos: $selectedPhotos)
                 }
@@ -30,7 +62,6 @@ struct VaultView: View {
                 VaultSignInRequiredView()
             }
         }
-        .environmentObject(vaultManager)
         .alert("Error", isPresented: $showError, presenting: error) { _ in
             Button("OK", role: .cancel) {}
         } message: { error in
@@ -47,23 +78,39 @@ struct VaultView: View {
         .onChange(of: authManager.user) { newUser in
             handleUserChange(newUser)
         }
+        .onAppear {
+            validateAndInitialize()
+        }
+    }
+    
+    private func validateAndInitialize() {
+        Task {
+            do {
+                // Validate user session
+                try await authManager.validateSession()
+                
+                if let user = authManager.user, let userId = user.id {
+                    vaultManager.setCurrentUser(user)
+                }
+            } catch {
+                self.error = error
+                self.showError = true
+            }
+        }
     }
     
     private func handleUserChange(_ user: User?) {
-        vaultManager.setCurrentUser(user)
-        if user != nil {
-            authenticate()
-        } else {
+        guard let user = user, let userId = user.id else {
             vaultManager.lock()
-        }
-    }
-    
-    private func authenticate() {
-        guard !vaultManager.isAuthenticating else { return }
-        guard let userId = authManager.user?.id else {
-            logger.error("Cannot authenticate: No valid user ID")
             return
         }
+        
+        vaultManager.setCurrentUser(user)
+        authenticate(userId: userId)
+    }
+    
+    private func authenticate(userId: String) {
+        guard !vaultManager.isAuthenticating else { return }
         
         logger.info("Starting vault authentication for user: \(userId)")
         
@@ -88,10 +135,8 @@ struct VaultView: View {
             vaultManager.lock()
             logger.info("App moved to background. Vault locked.")
         case .active:
-            if let user = authManager.user, !vaultManager.isAuthenticating {
-                logger.info("App became active. Re-authenticating vault.")
-                authenticate()
-            }
+            // When app becomes active, vault stays locked until user explicitly authenticates
+            break
         @unknown default:
             break
         }
@@ -142,15 +187,6 @@ struct VaultView: View {
         }
     }
     
-    private func getBiometricButtonLabel() -> String {
-        let (_, type, _) = authManager.checkBiometricAvailability()
-        switch type {
-        case .faceID: return "Unlock with Face ID"
-        case .touchID: return "Unlock with Touch ID"
-        default: return "Unlock with Passcode"
-        }
-    }
-    
     private func getBiometricButtonIcon() -> String {
         let (_, type, _) = authManager.checkBiometricAvailability()
         switch type {
@@ -186,76 +222,231 @@ struct VaultContentView: View {
     @State private var searchText = ""
     @State private var selectedType: VaultItemType?
     @State private var showFilePicker = false
+    @State private var showPhotoPickerSheet = false
+    @State private var showCameraScannerSheet = false
+    @State private var showTrashView = false
     @State private var error: Error?
     @State private var showError = false
+    @State private var isSelecting = false
+    @State private var selectedItems = Set<VaultItem>()
     
     private let logger = Logger(subsystem: "com.dynasty.VaultContentView", category: "UI")
-    private let columns = [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 16)]
+    private let columns = [
+        GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 16)
+    ]
     
-    var filteredItems: [VaultItem] {
+    private var filteredItems: [VaultItem] {
         vaultManager.items.filter { item in
-            let matchesSearch = searchText.isEmpty ||
-                item.title.localizedCaseInsensitiveContains(searchText)
+            guard !item.isDeleted else { return false }
+            
+            let matchesSearch = searchText.isEmpty || 
+                item.title.localizedCaseInsensitiveContains(searchText) ||
+                (item.description?.localizedCaseInsensitiveContains(searchText) ?? false)
+            
             let matchesType = selectedType == nil || item.fileType == selectedType
-            return !item.isDeleted && matchesSearch && matchesType
+            
+            return matchesSearch && matchesType
         }
+        .sorted { $0.updatedAt > $1.updatedAt }
     }
     
     var body: some View {
-        NavigationView {
+        ZStack(alignment: .bottomTrailing) {
             VStack(spacing: 0) {
+                // Top Header
+                HStack {
+                    Text("Vault")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                    Spacer()
+                    Text("\(filteredItems.count) Items")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                    
+                    if !isSelecting {
+                        Menu {
+                            Button("Select") {
+                                isSelecting = true
+                            }
+                            Button("New Folder") {
+                                // TODO: Implement folder creation
+                            }
+                            Button("Scan Documents") {
+                                showCameraScannerSheet = true
+                            }
+                            Button("View Trash") {
+                                showTrashView = true
+                            }
+                            
+                     
+                            
+                            Menu("Filter/Sort") {
+                                Button("Name") {
+                                    // Implement sort by name
+                                }
+                                Button("Kind") {
+                                    // Implement sort by kind
+                                }
+                                Button("Date") {
+                                    // Implement sort by date
+                                }
+                                Button("Size") {
+                                    // Implement sort by size
+                                }
+                                Button("Tags") {
+                                    // Implement sort by tags
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title2)
+                                .padding(.leading, 8)
+                        }
+                        .padding(.trailing)
+                    } else {
+                        Menu {
+                            Button("Download") {
+                                downloadSelectedItems()
+                            }
+                            Button("Share") {
+                                shareSelectedItems()
+                            }
+                            Button("Delete") {
+                                deleteSelectedItems()
+                            }
+                            Button("Cancel Selection") {
+                                isSelecting = false
+                                selectedItems.removeAll()
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title2)
+                                .padding(.leading, 8)
+                        }
+                        .padding(.trailing)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 20)
+                
                 // Search and Filter Bar
                 SearchFilterBar(searchText: $searchText, selectedType: $selectedType)
                 
-                // Content Grid
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(filteredItems) { item in
-                            VaultItemView(item: item)
-                                .environmentObject(vaultManager)
-                        }
+                // Vertical Grid Layout
+                if filteredItems.isEmpty {
+                    VStack {
+                        Spacer()
+                        Text("No items yet")
+                            .font(.headline)
+                            .foregroundColor(.gray)
+                        Text("Add your first item by clicking the plus button!")
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                        Spacer()
                     }
-                    .padding()
-                }
-                .refreshable {
-                    Task {
-                        do {
-                            guard let userId = vaultManager.currentUser?.id else {
-                                logger.error("Cannot refresh: No authenticated user")
-                                self.error = VaultError.authenticationFailed("Please sign in to access your vault")
-                                self.showError = true
-                                return
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 16) {
+                            ForEach(filteredItems) { item in
+                                NavigationLink(destination: VaultItemDetailView(document: item)) {
+                                    VStack(spacing: 8) {
+                                        VaultItemThumbnailView(item: item)
+                                            .frame(height: 150)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                            .overlay(
+                                                isSelecting ? SelectionOverlay(isSelected: selectedItems.contains(item)) {
+                                                    toggleSelection(for: item)
+                                                } : nil
+                                            )
+                                        
+                                        Text(item.title)
+                                            .font(.caption)
+                                            .lineLimit(1)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .onTapGesture {
+                                    if isSelecting {
+                                        toggleSelection(for: item)
+                                    }
+                                }
                             }
-                            try await vaultManager.loadItems(for: userId)
-                        } catch {
-                            self.error = error
-                            self.showError = true
-                            logger.error("Failed to refresh vault items: \(error.localizedDescription)")
                         }
+                        .padding()
                     }
+                    .refreshable {
+                        await refreshItems()
+                    }
+                }
+            }
+            
+            // Add Button Menu
+            Menu {
+                Button {
+                    showPhotoPickerSheet = true
+                } label: {
+                    Label("Upload from Photos", systemImage: "photo.on.rectangle")
                 }
                 
-                // Bottom Toolbar
-                VaultToolbar(
-                    selectedPhotos: $selectedPhotos,
-                    showFilePicker: $showFilePicker
-                )
+                Button {
+                    showFilePicker = true
+                } label: {
+                    Label("Upload from Files", systemImage: "folder")
+                }
+                
+                Button {
+                    showCameraScannerSheet = true
+                } label: {
+                    Label("Scan Documents", systemImage: "camera")
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .foregroundColor(.white)
+                    .padding()
+                    .background(Color.green)
+                    .clipShape(Circle())
+                    .shadow(radius: 5)
             }
-            .navigationTitle("Vault")
-            .navigationBarTitleDisplayMode(.inline)
-            .fileImporter(
-                isPresented: $showFilePicker,
-                allowedContentTypes: [.pdf, .plainText, .image, .video],
-                allowsMultipleSelection: true
-            ) { result in
-                handleFileImport(result)
-            }
-            .alert("Error", isPresented: $showError, presenting: error) { _ in
-                Button("OK", role: .cancel) {}
-            } message: { error in
-                Text(error.localizedDescription)
+            .padding(.trailing, 20)
+            .padding(.bottom, 20)
+        }
+        .navigationBarHidden(true)
+        .fileImporter(
+            isPresented: $showFilePicker,
+            allowedContentTypes: [.pdf, .plainText, .image, .video],
+            allowsMultipleSelection: true
+        ) { result in
+            handleFileImport(result)
+        }
+        .sheet(isPresented: $showPhotoPickerSheet) {
+            PhotosPicker(
+                selection: $selectedPhotos,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                Text("Select Photos")
             }
         }
+        .sheet(isPresented: $showCameraScannerSheet) {
+            DocumentScannerView { scannedImages in
+                handleScannedDocuments(scannedImages)
+            }
+        }
+        .sheet(isPresented: $showTrashView) {
+            TrashView()
+        }
+        .alert("Error", isPresented: $showError, presenting: error) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error.localizedDescription)
+        }
+        .gesture(
+            TapGesture()
+                .onEnded { _ in
+                    hideKeyboard()
+                }
+        )
     }
     
     private func handleFileImport(_ result: Result<[URL], Error>) {
@@ -281,20 +472,166 @@ struct VaultContentView: View {
             }
         }
     }
+    
+    private func toggleSelection(for item: VaultItem) {
+        if selectedItems.contains(item) {
+            selectedItems.remove(item)
+        } else {
+            selectedItems.insert(item)
+        }
+    }
+    
+    private func downloadSelectedItems() {
+        // Implement download logic for selected items
+    }
+    
+    private func shareSelectedItems() {
+        // Implement share logic for selected items
+    }
+    
+    private func deleteSelectedItems() {
+        Task {
+            do {
+                for item in selectedItems {
+                    try await vaultManager.moveToTrash(item)
+                }
+                selectedItems.removeAll()
+                isSelecting = false
+            } catch {
+                self.error = error
+                self.showError = true
+            }
+        }
+    }
+    
+    private func createNewFolder() {
+        // Implement folder creation logic
+    }
+    
+    private func handleScannedDocuments(_ images: [UIImage]) {
+        // Implement logic to process and upload scanned documents
+    }
+    
+    private func refreshItems() async {
+        do {
+            guard let userId = vaultManager.currentUser?.id else {
+                logger.error("Cannot refresh: No authenticated user")
+                self.error = VaultError.authenticationFailed("Please sign in to access your vault")
+                self.showError = true
+                return
+            }
+            try await vaultManager.loadItems(for: userId)
+        } catch {
+            self.error = error
+            self.showError = true
+            logger.error("Failed to refresh vault items: \(error.localizedDescription)")
+        }
+    }
+}
+
+// Keep only one SelectionOverlay implementation
+struct SelectionOverlay: View {
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.3)
+            
+            Circle()
+                .strokeBorder(Color.white, lineWidth: 2)
+                .background(
+                    Circle()
+                        .fill(isSelected ? Color.blue : Color.clear)
+                )
+                .frame(width: 24, height: 24)
+                .overlay(
+                    Image(systemName: "checkmark")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                        .opacity(isSelected ? 1 : 0)
+                )
+                .position(x: 20, y: 20)
+        }
+        .onTapGesture(perform: action)
+    }
+}
+
+// Document Scanner View
+struct DocumentScannerView: UIViewControllerRepresentable {
+    var completion: ([UIImage]) -> Void
+    
+    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+        let scannerVC = VNDocumentCameraViewController()
+        scannerVC.delegate = context.coordinator
+        return scannerVC
+    }
+    
+    func updateUIViewController(_ uiViewController: VNDocumentCameraViewController, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+    
+    class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+        let parent: DocumentScannerView
+        
+        init(parent: DocumentScannerView) {
+            self.parent = parent
+        }
+        
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            var images = [UIImage]()
+            for i in 0..<scan.pageCount {
+                images.append(scan.imageOfPage(at: i))
+            }
+            parent.completion(images)
+            controller.dismiss(animated: true)
+        }
+        
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+            controller.dismiss(animated: true)
+        }
+        
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+            controller.dismiss(animated: true)
+        }
+    }
+}
+
+enum VaultViewStyle {
+    case icons
+    case list
 }
 
 // Helper Views
 struct SearchFilterBar: View {
     @Binding var searchText: String
     @Binding var selectedType: VaultItemType?
+    @FocusState private var isSearchFocused: Bool
     
     var body: some View {
         VStack(spacing: 8) {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.gray)
+                
                 TextField("Search files", text: $searchText)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .focused($isSearchFocused)
+                    .submitLabel(.search)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                
+                if !searchText.isEmpty {
+                    Button(action: {
+                        searchText = ""
+                        isSearchFocused = false
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.gray)
+                    }
+                }
             }
             .padding(.horizontal)
             
@@ -302,15 +639,23 @@ struct SearchFilterBar: View {
                 HStack(spacing: 12) {
                     FilterChip(title: "All", isSelected: selectedType == nil) {
                         selectedType = nil
+                        isSearchFocused = false
                     }
                     FilterChip(title: "Documents", isSelected: selectedType == .document) {
                         selectedType = .document
+                        isSearchFocused = false
                     }
                     FilterChip(title: "Photos", isSelected: selectedType == .image) {
                         selectedType = .image
+                        isSearchFocused = false
                     }
                     FilterChip(title: "Videos", isSelected: selectedType == .video) {
                         selectedType = .video
+                        isSearchFocused = false
+                    }
+                    FilterChip(title: "Audio", isSelected: selectedType == .audio) {
+                        selectedType = .audio
+                        isSearchFocused = false
                     }
                 }
                 .padding(.horizontal)
@@ -385,6 +730,23 @@ struct LockScreenView: View {
                 }
                 .padding(.horizontal)
             }
+        }
+    }
+}
+struct FilterChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isSelected ? Color.accentColor : Color.gray.opacity(0.2))
+                .foregroundColor(isSelected ? .white : .primary)
+                .cornerRadius(16)
         }
     }
 }
@@ -507,7 +869,7 @@ struct VaultItemView: View {
         
         do {
             try data.write(to: tempURL)
-            let asset = AVAsset(url: tempURL)
+            let asset = AVURLAsset(url: tempURL)
             let imageGenerator = AVAssetImageGenerator(asset: asset)
             imageGenerator.appliesPreferredTrackTransform = true
             imageGenerator.maximumSize = CGSize(width: 150, height: 150)

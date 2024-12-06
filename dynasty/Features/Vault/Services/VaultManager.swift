@@ -71,6 +71,10 @@ class VaultManager: ObservableObject {
     private var currentAuthenticationTask: Task<Void, Error>?
     private var processingTask: Task<Void, Error>?
     
+    // New properties for authentication tracking
+    private var failedAttempts = 0
+    private var lockUntil: Date?
+    
     private init() {
         self.encryptionService = VaultEncryptionService()
         self.storageService = FirebaseStorageService.shared
@@ -110,22 +114,81 @@ class VaultManager: ObservableObject {
         self.isDocumentPickerPresented = isPresented
     }
     
-    func unlock() async throws {
-        guard !self.isAuthenticating, let userId = currentUser?.id else {
-            throw VaultError.authenticationFailed("No authenticated user found")
+    // New method for biometric authentication
+    private func authenticateUser() async throws {
+        // Check lockout status
+        if let lockUntil = lockUntil, Date() < lockUntil {
+            let remaining = Int(lockUntil.timeIntervalSinceNow / 60)
+            let message = "Vault is locked due to multiple failed attempts. Please try again in \(max(1, remaining)) minute(s)."
+            logger.error("\(message)")
+            throw VaultError.authenticationFailed(message)
         }
         
         self.isAuthenticating = true
         defer { self.isAuthenticating = false }
         
+        let context = LAContext()
+        context.localizedCancelTitle = "Cancel"
+        context.localizedReason = "Authenticate to access your secure vault"
+        
         do {
-            try await self.encryptionService.initialize()
-            try await self.dbManager.openDatabase(for: userId)
-            try await self.loadItems(for: userId)
-            self.isLocked = false
-            self.logger.info("Vault unlocked successfully for user: \(userId)")
+            let success = try await withCheckedThrowingContinuation { continuation in
+                context.evaluatePolicy(.deviceOwnerAuthentication, 
+                                    localizedReason: "Access your vault") { success, error in
+                    if success {
+                        continuation.resume(returning: ())
+                    } else if let error = error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(throwing: VaultError.authenticationFailed("Unknown authentication error"))
+                    }
+                }
+            }
+            
+            // Authentication succeeded
+            logger.info("User successfully authenticated via biometrics/passcode")
+            failedAttempts = 0
+            
         } catch {
-            self.logger.error("Failed to unlock vault: \(error.localizedDescription)")
+            // Handle failed attempt
+            failedAttempts += 1
+            logger.error("Authentication failed. Attempt \(self.failedAttempts) of 5. Error: \(error.localizedDescription)")
+            
+            if failedAttempts >= 5 {
+                // Lock the vault for 10 minutes
+                lockUntil = Date().addingTimeInterval(10 * 60)
+                failedAttempts = 0
+                let message = "Too many failed attempts. Vault locked for 10 minutes."
+                logger.error("\(message)")
+                throw VaultError.authenticationFailed(message)
+            }
+            
+            if (error as NSError).code == LAError.userCancel.rawValue {
+                throw VaultError.authenticationCancelled
+            } else {
+                throw VaultError.authenticationFailed("Authentication failed. Please try again.")
+            }
+        }
+    }
+    
+    // Update unlock method to use new authentication
+    func unlock() async throws {
+        guard let user = currentUser, let userId = user.id else {
+            throw VaultError.authenticationFailed("No authenticated user found")
+        }
+        
+        // Require user authentication before unlocking
+        try await authenticateUser()
+        
+        // Once authenticated, proceed with vault unlocking
+        do {
+            try await encryptionService.initialize()
+            try await dbManager.openDatabase(for: userId)
+            try await loadItems(for: userId)
+            isLocked = false
+            logger.info("Vault unlocked successfully for user: \(userId)")
+        } catch {
+            logger.error("Failed to unlock vault after authentication: \(error.localizedDescription)")
             throw error
         }
     }
@@ -366,5 +429,28 @@ class VaultManager: ObservableObject {
     private func saveItems(_ items: [VaultItem], for userId: String) async throws {
         try await self.dbManager.saveItems(items, for: userId)
         self.logger.info("Items saved to Firestore for user: \(userId)")
+    }
+    
+     
+}
+
+extension VaultManager {
+    func moveToTrash(_ item: VaultItem) async throws {
+        guard let userId = currentUser?.id else {
+            throw VaultError.authenticationFailed("No authenticated user")
+        }
+        
+        // Mark the item as deleted
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            var updatedItem = items[index]
+            updatedItem.isDeleted = true
+            updatedItem.updatedAt = Date()
+            items[index] = updatedItem
+            
+            // Save the updated items to Firestore
+            try await saveItems(items, for: userId)
+        } else {
+            throw VaultError.itemNotFound("Item not found to move to trash")
+        }
     }
 }

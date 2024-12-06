@@ -4,6 +4,12 @@
 <dict>
 	<key>NSFaceIDUsageDescription</key>
 	<string>We use Face ID to securely authenticate your identity and provide personalized experiences.</string>
+	<key>NSCameraUsageDescription</key>
+    <string>Dynasty needs camera access to scan documents and add them to your secure vault.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Dynasty needs access to your photo library to let you select and upload images to your secure vault.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Dynasty needs permission to save images to your photo library when you export them from your vault.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
