@@ -61,7 +61,7 @@ class FamilyTreeViewModel: ObservableObject {
             .collection("members")
             .document(member.id)
         
-        try await memberRef.setData(from: member)
+        try memberRef.setData(from: member)
     }
     
     func updateMember(_ member: FamilyTreeNode) async throws {
@@ -70,7 +70,7 @@ class FamilyTreeViewModel: ObservableObject {
             .collection("members")
             .document(member.id)
         
-        try await memberRef.setData(from: member)
+        try  memberRef.setData(from: member)
         try await loadTreeData()
     }
     

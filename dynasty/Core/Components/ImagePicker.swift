@@ -4,6 +4,8 @@ import UIKit
 struct ImagePicker: UIViewControllerRepresentable {
     @Binding var selectedImage: UIImage?
     @Environment(\.dismiss) private var dismiss
+    var sourceType: UIImagePickerController.SourceType = .photoLibrary
+    var currentFolderId: String?
 
     class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
         let parent: ImagePicker
@@ -34,6 +36,7 @@ struct ImagePicker: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
         picker.delegate = context.coordinator
+        picker.sourceType = sourceType
         picker.mediaTypes = ["public.image"]
         return picker
     }

@@ -21,14 +21,29 @@ struct VaultItemDetailView: View {
     @State private var previewURL: URL?
     @State private var previewImage: UIImage?
     @State private var showQuickLook = true
+    @State private var showFilePreview = false
     
     private let logger = Logger(subsystem: "com.dynasty.VaultItemDetailView", category: "UI")
     
     var body: some View {
         Group {
-            if showQuickLook, let url = previewURL {
-                QuickLookPreview(url: url, displayName: fileNameWithoutExtension(document.title))
-                    .edgesIgnoringSafeArea(.all)
+            if showFilePreview, let url = previewURL {
+                FilePreviewView(
+                    fileURL: url,
+                    fileName: fileNameWithoutExtension(document.title),
+                    isPresented: $showFilePreview,
+                    onShare: shareDocument,
+                    onDownload: downloadDocument,
+                    onDelete: {
+                        showFilePreview = false
+                        showDeleteConfirmation = true
+                    },
+                    onRename: {
+                        showFilePreview = false
+                        newName = document.title
+                        showRenameSheet = true
+                    }
+                )
             } else {
                 List {
                     if let previewImage = previewImage, document.fileType == .image {
@@ -183,6 +198,14 @@ struct VaultItemDetailView: View {
                 document = updatedItem
             }
         }
+        .onChange(of: showFilePreview) { newValue in
+            if !newValue {
+                if let url = previewURL {
+                    try? FileManager.default.removeItem(at: url)
+                    previewURL = nil
+                }
+            }
+        }
     }
     
     private func fileNameWithoutExtension(_ fileName: String) -> String {
@@ -207,10 +230,15 @@ struct VaultItemDetailView: View {
                     let scaledImage = image.scaleToFit(within: maxSize)
                     previewImage = scaledImage
                 }
-            case .video:
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
-                try data.write(to: tempURL)
-                previewURL = tempURL
+            case .video, .document, .audio:
+                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(document.title)
+                do {
+                    try data.write(to: tempURL)
+                    previewURL = tempURL
+                    showFilePreview = true
+                } catch {
+                    logger.error("Failed to write temporary file for preview: \(error.localizedDescription)")
+                }
             default:
                 break
             }

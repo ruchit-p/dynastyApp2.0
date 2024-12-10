@@ -17,9 +17,23 @@ struct ProfileView: View {
                         .font(.largeTitle)
                         .fontWeight(.bold)
                     Spacer()
-                    Image(systemName: "person.circle")
-                        .resizable()
-                        .frame(width: 40, height: 40)
+                    
+                    // Avatar with edit option
+                    NavigationLink(destination: UserProfileEditView(currentUser: userData ?? .init(id: "", displayName: "", email: "", dateOfBirth: Date(), firstName: "", lastName: "", phoneNumber: "", familyTreeID: "", historyBookID: "", parentIds: [], childrenIds: [], isAdmin: false, canAddMembers: false, canEdit: false, photoURL: "", createdAt: Timestamp(), updatedAt: nil))) {
+                        if let photoURL = userData?.photoURL, let url = URL(string: photoURL) {
+                            AsyncImage(url: url) { image in
+                                image.resizable()
+                            } placeholder: {
+                                ProgressView()
+                            }
+                            .frame(width: 60, height: 60)
+                            .clipShape(Circle())
+                        } else {
+                            Image(systemName: "person.circle.fill")
+                                .resizable()
+                                .frame(width: 60, height: 60)
+                        }
+                    }
                 }
                 .padding(.horizontal)
                 .padding(.top, 20)
@@ -38,6 +52,11 @@ struct ProfileView: View {
                 
                 // Profile options
                 VStack(spacing: 20) {
+                    // Category buttons
+                    NavigationLink(destination: UserProfileEditView(currentUser: userData ?? .init(id: "", displayName: "", email: "", dateOfBirth: Date(), firstName: "", lastName: "", phoneNumber: "", familyTreeID: "", historyBookID: "", parentIds: [], childrenIds: [], isAdmin: false, canAddMembers: false, canEdit: false, photoURL: "", createdAt: Timestamp(), updatedAt: nil))) {
+                        ProfileCategoryRow(title: "Personal Information", systemImage: "person")
+                    }
+                    
                     // ... other buttons ...
                     
                     Button(action: {
@@ -91,6 +110,26 @@ struct ProfileView: View {
                 print("User document does not exist.")
             }
         }
+    }
+}
+
+// Helper view for category rows
+struct ProfileCategoryRow: View {
+    var title: String
+    var systemImage: String
+
+    var body: some View {
+        HStack {
+            Image(systemName: systemImage)
+                .font(.headline)
+            Text(title)
+                .font(.headline)
+            Spacer()
+            Image(systemName: "chevron.right")
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(10)
     }
 }
 

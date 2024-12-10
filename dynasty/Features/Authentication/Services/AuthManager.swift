@@ -553,6 +553,28 @@ class AuthManager: ObservableObject {
         }
     }
     
+    // Add a new function to fetch and update the user
+    func fetchAndUpdateUser() async {
+        guard let currentUser = auth.currentUser else { return }
+        
+        do {
+            let document = try await db.collection(Constants.Firebase.usersCollection).document(currentUser.uid).getDocument()
+            
+            guard document.exists else {
+                logger.error("User document does not exist for uid: \(currentUser.uid)")
+                return
+            }
+            
+            let userData = try document.data(as: User.self)
+            
+            await MainActor.run {
+                self.user = userData
+            }
+        } catch {
+            logger.error("Failed to fetch and update user: \(error.localizedDescription)")
+        }
+    }
+    
     // MARK: - Face ID Handling
     
     private func promptForFaceIDSetup() async {

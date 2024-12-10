@@ -455,7 +455,7 @@ class VaultManager: ObservableObject {
     ) async throws {
         let fileData = try Data(contentsOf: url)
         let fileType = try determineFileType(from: url)
-        let encryptionKeyId = try await generateEncryptionKey(for: userId)
+        let encryptionKeyId = try generateEncryptionKey(for: userId)
         
         let metadata = VaultItemMetadata(
             originalFileName: url.lastPathComponent,

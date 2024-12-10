@@ -185,12 +185,38 @@ struct AddStoryView: View {
                 if let error = error {
                     self.errorMessage = AppError(message: "Error adding story: \(error.localizedDescription)")
                 } else {
+                    // Story saved successfully, now create a post
+                    self.createPostFromStory(story: story)
                     dismiss()
                 }
             }
         } catch {
             isUploading = false
             self.errorMessage = AppError(message: "Error encoding story data: \(error.localizedDescription)")
+        }
+    }
+
+    private func createPostFromStory(story: Story) {
+        // Fetch username if needed, or store it in the story creation process
+        // For now, assume we have a method to get the current user’s displayName:
+        let username = Auth.auth().currentUser?.displayName ?? "Unknown User"
+
+        let caption = String(story.content.prefix(400))
+        let db = Firestore.firestore()
+        let postRef = db.collection("posts").document()
+
+        let post = Post(
+            username: username,
+            date: Timestamp(date: story.createdAt ?? Date()),
+            caption: caption,
+            imageURL: story.coverImageURL,
+            timestamp: Timestamp(date: Date())
+        )
+
+        do {
+            try postRef.setData(from: post)
+        } catch {
+            print("Failed to create post from story: \(error.localizedDescription)")
         }
     }
 } 

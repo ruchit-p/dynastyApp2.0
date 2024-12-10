@@ -28,7 +28,7 @@ actor ThumbnailService {
         NotificationCenter.default.removeObserver(self)
     }
     
-    private func setupMemoryWarningObserver() {
+    private nonisolated func setupMemoryWarningObserver() {
         NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -47,10 +47,10 @@ actor ThumbnailService {
     }
     
     func generateThumbnail(for item: VaultItem, data: Data) async throws -> UIImage {
-        let cacheKey = NSString(string: item.id)
+        let cacheKey = item.id
         
         // Check cache first
-        if let cachedThumbnail = cache.object(forKey: cacheKey) {
+        if let cachedThumbnail = cache.object(forKey: cacheKey as NSString) {
             return cachedThumbnail
         }
         
@@ -142,7 +142,7 @@ actor ThumbnailService {
         let tempURL = try createTemporaryFile(with: data, mimeType: mimeType)
         defer { try? fileManager.removeItem(at: tempURL) }
         
-        let request = QLThumbnailGenerator.Request(
+        let request = await QLThumbnailGenerator.Request(
             fileAt: tempURL,
             size: thumbnailSize,
             scale: UIScreen.main.scale,
@@ -159,7 +159,7 @@ actor ThumbnailService {
             let tempURL = try createTemporaryFile(with: data, mimeType: "video/mp4")
             defer { try? fileManager.removeItem(at: tempURL) }
             
-            let asset = AVAsset(url: tempURL)
+            let asset = AVURLAsset(url: tempURL)
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
             generator.maximumSize = thumbnailSize
@@ -194,8 +194,8 @@ actor ThumbnailService {
         return tempURL
     }
     
-    private func cacheResult(_ thumbnail: UIImage, forKey key: NSString) {
-        cache.setObject(thumbnail, forKey: key)
+    private func cacheResult(_ thumbnail: UIImage, forKey key: String) {
+        cache.setObject(thumbnail, forKey: key as NSString)
     }
 }
 

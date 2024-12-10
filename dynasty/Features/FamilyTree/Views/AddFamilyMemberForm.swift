@@ -86,7 +86,7 @@ struct AddFamilyMemberForm: View {
 
         do {
             // Add the new member and get the DocumentReference
-            let newMemberRef = try await familyMembersRef.addDocument(from: newFamilyMember)
+            let newMemberRef = try familyMembersRef.addDocument(from: newFamilyMember)
             // Use the document ID to add the relationship
             try await addRelationship(toMemberID: newMemberRef.documentID)
             // Refresh the tree data
