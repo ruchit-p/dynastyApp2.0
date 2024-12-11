@@ -28,6 +28,11 @@ struct VaultItemGrid: View {
             }
         }
         .padding()
+        .refreshable {
+            Task {
+                await refreshItems()
+            }
+        }
     }
     
     private func toggleSelection(for item: VaultItem) {

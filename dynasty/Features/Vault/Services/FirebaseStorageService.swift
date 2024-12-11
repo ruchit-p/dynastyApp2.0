@@ -8,6 +8,40 @@ class FirebaseStorageService {
     private let logger = Logger(subsystem: "com.dynasty.FirebaseStorageService", category: "Storage")
     
     private init() {}
+
+    func fetchItems(for userId: String, sortOption: SortOption, isAscending: Bool) async throws -> [VaultItem] {
+        logger.info("Fetching vault items for user: \(userId) with sorting")
+
+        let collectionRef = db.collection("users").document(userId).collection("vaultItems")
+
+        // Construct the query with ordering
+        var query: Query = collectionRef
+
+        switch sortOption {
+        case .name:
+            query = query.order(by: "title", descending: !isAscending)
+        case .kind:
+            query = query.order(by: "fileType", descending: !isAscending)
+        case .date:
+            query = query.order(by: "createdAt", descending: !isAscending)
+        case .size:
+            query = query.order(by: "metadata.fileSize", descending: !isAscending)
+        }
+
+        let snapshot = try await query.getDocuments()
+        var items: [VaultItem] = []
+        for doc in snapshot.documents {
+            do {
+                let item = try doc.data(as: VaultItem.self)
+                items.append(item)
+            } catch {
+                logger.error("Failed to decode VaultItem \(doc.documentID): \(error.localizedDescription)")
+            }
+        }
+        logger.info("Fetched \(items.count) vault items from Firestore for user: \(userId)")
+        return items
+    }
+
     
     func uploadEncryptedData(_ data: Data, fileName: String, userId: String) async throws -> String {
         let storageRef = storage.reference()

@@ -30,7 +30,7 @@ class CameraService: ObservableObject {
             }
 
             let filename = "\(UUID().uuidString).jpg"
-            let encryptionKeyId = try await vaultManager.generateEncryptionKey(for: userId)
+            let encryptionKeyId = try  vaultManager.generateEncryptionKey(for: userId)
 
             let metadata = VaultItemMetadata(
                 originalFileName: filename,

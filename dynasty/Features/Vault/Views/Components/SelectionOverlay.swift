@@ -25,4 +25,65 @@ struct SelectionOverlay: View {
         }
         .onTapGesture(perform: action)
     }
+
+        private func downloadSelectedItems() async {
+        do {
+            var tempFiles: [URL] = []
+            for item in selectedItems {
+                let data = try await vaultManager.downloadFile(item)
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(item.title)
+                try data.write(to: tempURL, options: .atomic)
+                tempFiles.append(tempURL)
+            }
+            
+            await MainActor.run {
+                self.shareSheetItems = tempFiles
+                self.showShareSheet = true
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error
+                self.showError = true
+            }
+        }
+    }
+
+       private func shareSelectedItems() async {
+        do {
+            var tempFiles: [URL] = []
+            for item in selectedItems {
+                let data = try await vaultManager.downloadFile(item)
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(item.title)
+                try data.write(to: tempURL, options: .atomic)
+                tempFiles.append(tempURL)
+            }
+            
+            await MainActor.run {
+                self.shareSheetItems = tempFiles
+                self.showShareSheet = true
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error
+                self.showError = true
+            }
+        }
+    }
+
+       private func deleteSelectedItems() async {
+        do {
+            for item in selectedItems {
+                    try await vaultManager.moveToTrash(item)
+            }
+            selectedItems.removeAll()
+            vaultManager.clearItemsCache()
+            isSelecting = false
+            await refreshItems()
+        } catch {
+            self.error = error
+            self.showError = true
+        }
+    }
 } 

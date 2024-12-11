@@ -73,7 +73,7 @@ class VaultManager: ObservableObject {
     
     // Cache properties
     private var fileDataCache: [String: Data] = [:]
-    private var thumbnailCache: [String: UIImage] = [:]
+    private let thumbnailCache = NSCache<NSString, UIImage>()
     
     // New properties for authentication tracking
     private var failedAttempts = 0
@@ -96,15 +96,14 @@ class VaultManager: ObservableObject {
     }
     
     func cachedThumbnail(for item: VaultItem) -> UIImage? {
-        // Check memory cache first
-        if let inMemory = thumbnailCache[item.id] {
-            return inMemory
+        if let cachedImage = thumbnailCache.object(forKey: item.id as NSString) {
+            return cachedImage
         }
-        
+
         // Try loading from encrypted disk cache
         do {
             if let diskThumbnail = try loadEncryptedThumbnail(for: item) {
-                thumbnailCache[item.id] = diskThumbnail
+                thumbnailCache.setObject(diskThumbnail, forKey: item.id as NSString)
                 return diskThumbnail
             }
         } catch {
@@ -123,7 +122,7 @@ class VaultManager: ObservableObject {
     
     func clearCache() {
         fileDataCache.removeAll()
-        thumbnailCache.removeAll()
+        thumbnailCache.removeAllObjects()
         logger.info("In-memory caches cleared")
     }
     
@@ -235,9 +234,51 @@ class VaultManager: ObservableObject {
             items[index] = updatedItem
             
             try await dbManager.saveItems(items, for: userId)
+            clearItemsCache()
             logger.info("Successfully renamed item: \(item.id)")
         } else {
             throw VaultError.itemNotFound("Item not found for renaming")
+        }
+    }
+
+    private var itemsCache: [String: [VaultItem]] = [:]
+    private let cacheQueue = DispatchQueue(label: "com.dynasty.VaultManager.cacheQueue")
+
+
+func loadItems(for userId: String, sortOption: SortOption, isAscending: Bool) async throws {
+        logger.info("Loading vault items for user: \(userId) with sorting")
+        
+        let cacheKey = "\(userId)-\(sortOption.rawValue)-\(isAscending)"
+        
+        // Check cache first
+        if let cachedItems = itemsCache[cacheKey] {
+            logger.info("Using cached items for key: \(cacheKey)")
+            await MainActor.run {
+                self.items = cachedItems
+            }
+            return
+        }
+        
+        do {
+            let fetchedItems = try await dbManager.fetchItems(for: userId, sortOption: sortOption, isAscending: isAscending)
+            await MainActor.run {
+                self.items = fetchedItems
+            }
+            // Cache the fetched items
+            cacheQueue.sync {
+                self.itemsCache[cacheKey] = fetchedItems
+            }
+            
+            logger.info("Successfully loaded \(self.items.count) items for user: \(userId) and cached with key: \(cacheKey)")
+        } catch {
+            logger.error("Failed to load items: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    func clearItemsCache() {
+        cacheQueue.sync {
+            itemsCache.removeAll()
         }
     }
     
@@ -299,9 +340,10 @@ class VaultManager: ObservableObject {
             
             // Remove from caches when moved to trash
             fileDataCache.removeValue(forKey: item.id)
-            thumbnailCache.removeValue(forKey: item.id)
+            thumbnailCache.removeObject(forKey: item.id as NSString)
             
             try await dbManager.saveItems(items, for: userId)
+            clearItemsCache()
             logger.info("Item moved to trash and removed from cache: \(item.id)")
         } else {
             throw VaultError.itemNotFound("Item not found to move to trash")
@@ -329,31 +371,31 @@ class VaultManager: ObservableObject {
         }
     }
     
-    func permanentlyDeleteItem(_ item: VaultItem) async throws {
-        guard !isLocked else {
-            throw VaultError.vaultLocked
-        }
+func permanentlyDeleteItem(_ item: VaultItem) async throws {
+    guard !isLocked else {
+        throw VaultError.vaultLocked
+    }
+
+    guard let userId = currentUser?.id else {
+        throw VaultError.authenticationFailed("No authenticated user")
+    }
+
+    logger.info("Permanently deleting item: \(item.id)")
+
+    do {
+        try await storageService.deleteFile(at: item.storagePath)
+        items.removeAll(where: { $0.id == item.id })
+
+        // Remove from caches when permanently deleted
+        fileDataCache.removeValue(forKey: item.id)
+        thumbnailCache.removeObject(forKey: item.id as NSString) // Fixed line
+
+        try await dbManager.deleteItem(item, for: userId)
         
-        guard let userId = currentUser?.id else {
-            throw VaultError.authenticationFailed("No authenticated user")
-        }
-        
-        logger.info("Permanently deleting item: \(item.id)")
-        
-        do {
-            try await storageService.deleteFile(at: item.storagePath)
-            items.removeAll(where: { $0.id == item.id })
-            
-            // Remove from caches when permanently deleted
-            fileDataCache.removeValue(forKey: item.id)
-            thumbnailCache.removeValue(forKey: item.id)
-            
-            try await dbManager.deleteItem(item, for: userId)
-            
-            logger.info("Successfully deleted item permanently: \(item.id)")
-        } catch {
-            logger.error("Failed to permanently delete item: \(error.localizedDescription)")
-            throw error
+        logger.info("Successfully deleted item permanently: \(item.id)")
+    } catch {
+        logger.error("Failed to permanently delete item: \(error.localizedDescription)")
+        throw error
         }
     }
     
@@ -444,6 +486,7 @@ class VaultManager: ObservableObject {
         
         items.append(item)
         try await dbManager.saveItems(items, for: userId)
+        clearItemsCache()
         logger.info("Successfully imported data")
     }
     
@@ -577,9 +620,26 @@ class VaultManager: ObservableObject {
         try encryptedData.write(to: url, options: .atomic)
         
         // Store a reference in memory
-        thumbnailCache[item.id] = image
+        thumbnailCache.setObject(image, forKey: item.id as NSString)
         
         logger.info("Successfully cached encrypted thumbnail for item: \(item.id)")
+    }
+
+    // Set a limit to the cache
+    
+
+    // Optionally, clear cache when receiving memory warnings
+    NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(clearMemoryCaches),
+        name: UIApplication.didReceiveMemoryWarningNotification,
+        object: nil
+    )
+
+    @objc private func clearMemoryCaches() {
+        thumbnailCache.removeAllObjects()
+        fileDataCache.removeAll()
+        logger.info("Memory caches cleared due to memory warning")
     }
     
     func loadEncryptedThumbnail(for item: VaultItem) throws -> UIImage? {
