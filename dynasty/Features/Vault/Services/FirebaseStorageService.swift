@@ -9,6 +9,10 @@ class FirebaseStorageService {
     private let db = FirestoreManager.shared.getDB()
     private let logger = Logger(subsystem: "com.dynasty.FirebaseStorageService", category: "Storage")
     
+    // Use a serial queue to ensure thread safety for uploadTasks
+    private let uploadQueue = DispatchQueue(label: "com.dynasty.FirebaseStorageService.uploadQueue")
+    private var uploadTasks: [String: StorageUploadTask] = [:]
+    
     private init() {}
 
     func fetchItems(for userId: String, sortOption: SortOption, isAscending: Bool) async throws -> [VaultItem] {
@@ -45,80 +49,97 @@ class FirebaseStorageService {
     }
 
     
-    func uploadEncryptedData(_ data: Data, fileName: String, userId: String) async throws -> String {
+    func uploadEncryptedData(
+        _ data: Data,
+        fileName: String,
+        userId: String,
+        progressHandler: ((Double) -> Void)? = nil,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
         let storageRef = storage.reference()
         let userFolderRef = storageRef.child("vault").child(userId)
         let fileRef = userFolderRef.child(fileName)
-        
+
         let metadata = StorageMetadata()
         metadata.contentType = "application/octet-stream"
-        
-        do {
-            logger.info("Starting upload for file: \(fileName) to path: \(fileRef.fullPath)")
-            _ = try await fileRef.putDataAsync(data, metadata: metadata)
-            logger.info("Successfully uploaded encrypted data to Firebase Storage")
-            return fileRef.fullPath
-        } catch let error as NSError {
-            logger.error("Failed to upload encrypted data: \(error.localizedDescription)")
-            if error.domain == StorageErrorDomain {
-                switch error.code {
-                case StorageErrorCode.unauthorized.rawValue:
-                    throw VaultError.fileOperationFailed("Unauthorized access to storage. Please check permissions.")
-                case StorageErrorCode.quotaExceeded.rawValue:
-                    throw VaultError.fileOperationFailed("Storage quota exceeded. Please free up space.")
-                case StorageErrorCode.retryLimitExceeded.rawValue:
-                    throw VaultError.fileOperationFailed("Network error. Please try again.")
-                default:
-                    throw VaultError.fileOperationFailed("Storage error: \(error.localizedDescription)")
-                }
+
+        // Cancel any existing upload task for this file
+        uploadQueue.sync {
+            if let existingTask = uploadTasks[fileName] {
+                existingTask.cancel()
+                uploadTasks.removeValue(forKey: fileName)
+                logger.info("Cancelled existing upload task for file: \(fileName)")
             }
-            throw VaultError.fileOperationFailed("Failed to upload encrypted file: \(error.localizedDescription)")
+        }
+
+        logger.info("Starting upload for file: \(fileName) to path: \(fileRef.fullPath)")
+        let uploadTask = fileRef.putData(data, metadata: metadata)
+
+        // Track the new upload task
+        uploadQueue.sync {
+            uploadTasks[fileName] = uploadTask
+        }
+
+        // Observe progress
+        uploadTask.observe(.progress) { snapshot in
+            if let progress = snapshot.progress {
+                let percentComplete = 100.0 * Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
+                progressHandler?(percentComplete) // Call the progress handler, if provided
+            }
+        }
+
+        // Handle success and failure
+        uploadTask.observe(.success) { [weak self] snapshot in
+            self?.uploadQueue.sync {
+                self?.uploadTasks.removeValue(forKey: fileName)
+            }
+            self?.logger.info("Successfully uploaded encrypted data to Firebase Storage")
+            completion(.success(fileRef.fullPath))
+        }
+
+        uploadTask.observe(.failure) { [weak self] snapshot in
+            self?.uploadQueue.sync {
+                self?.uploadTasks.removeValue(forKey: fileName)
+            }
+            if let error = snapshot.error as NSError? {
+                self?.logger.error("Failed to upload encrypted data: \(error.localizedDescription)")
+                let vaultError = self?.handleFirebaseStorageError(error) ?? VaultError.fileOperationFailed("Failed to upload encrypted file: \(error.localizedDescription)")
+                completion(.failure(vaultError))
+            } else {
+                completion(.failure(VaultError.fileOperationFailed("Failed to upload encrypted file: Unknown error")))
+            }
         }
     }
     
-    func downloadEncryptedData(from path: String, progressHandler: ((Double) -> Void)? = nil) async throws -> Data {
+    func downloadEncryptedData(
+        from path: String,
+        progressHandler: ((Double) -> Void)? = nil,
+        completion: @escaping (Result<Data, Error>) -> Void
+    ) {
         let fileRef = storage.reference(withPath: path)
         let maxSize: Int64 = 100 * 1024 * 1024 // 100MB limit
-        
-        do {
-            logger.info("Starting download from path: \(path)")
-            
-            return try await withCheckedThrowingContinuation { continuation in
-                let task = fileRef.getData(maxSize: maxSize) { data, error in
-                    if let error = error as? NSError {
-                        if error.domain == StorageErrorDomain {
-                            switch error.code {
-                            case StorageErrorCode.unauthorized.rawValue:
-                                continuation.resume(throwing: VaultError.fileOperationFailed("Unauthorized access to file. Please check permissions."))
-                            case StorageErrorCode.objectNotFound.rawValue:
-                                continuation.resume(throwing: VaultError.fileOperationFailed("File not found in storage."))
-                            default:
-                                continuation.resume(throwing: VaultError.fileOperationFailed("Storage error: \(error.localizedDescription)"))
-                            }
-                        } else {
-                            continuation.resume(throwing: error)
-                        }
-                        return
-                    }
-                    
-                    if let data = data {
-                        continuation.resume(returning: data)
-                    } else {
-                        continuation.resume(throwing: VaultError.fileOperationFailed("No data received"))
-                    }
-                }
-                
-                // Observe download progress
-                task.observe(.progress) { snapshot in
-                    if let progress = snapshot.progress {
-                        let percentComplete = Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
-                        progressHandler?(percentComplete)
-                    }
-                }
+
+        logger.info("Starting download from path: \(path)")
+
+        let downloadTask = fileRef.getData(maxSize: maxSize) { data, error in
+            if let error = error as NSError? {
+                self.logger.error("Failed to download encrypted data: \(error.localizedDescription)")
+                let vaultError = self.handleFirebaseStorageError(error) ?? VaultError.fileOperationFailed("Failed to download encrypted file: \(error.localizedDescription)")
+                completion(.failure(vaultError))
+            } else if let data = data {
+                self.logger.info("Successfully downloaded encrypted data from Firebase Storage")
+                completion(.success(data))
+            } else {
+                completion(.failure(VaultError.fileOperationFailed("Failed to download encrypted file: Unknown error")))
             }
-        } catch {
-            logger.error("Failed to download encrypted data: \(error.localizedDescription)")
-            throw error
+        }
+
+        // Observe progress
+        downloadTask.observe(.progress) { snapshot in
+            if let progress = snapshot.progress {
+                let percentComplete = 100.0 * Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
+                progressHandler?(percentComplete) // Call the progress handler, if provided
+            }
         }
     }
     
@@ -144,6 +165,23 @@ class FirebaseStorageService {
             }
             throw VaultError.fileOperationFailed("Failed to delete file: \(error.localizedDescription)")
         }
+    }
+
+    // Helper function to handle Firebase Storage errors
+    private func handleFirebaseStorageError(_ error: NSError) -> VaultError {
+        if error.domain == StorageErrorDomain {
+            switch error.code {
+            case StorageErrorCode.unauthorized.rawValue:
+                return VaultError.fileOperationFailed("Unauthorized access to storage. Please check permissions.")
+            case StorageErrorCode.quotaExceeded.rawValue:
+                return VaultError.fileOperationFailed("Storage quota exceeded. Please free up space.")
+            case StorageErrorCode.retryLimitExceeded.rawValue:
+                return VaultError.fileOperationFailed("Network error. Please try again.")
+            default:
+                return VaultError.fileOperationFailed("Storage error: \(error.localizedDescription)")
+            }
+        }
+        return VaultError.fileOperationFailed("Failed to perform storage operation: \(error.localizedDescription)")
     }
 }
 

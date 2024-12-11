@@ -12,25 +12,39 @@ class AddStoryViewModel: ObservableObject {
     private let storage = Storage.storage()
     
     func createStory(title: String, content: String, images: [UIImage], privacy: String, familyTreeId: String, creatorUserId: String) async throws {
-        isLoading = true
-        defer { isLoading = false }
+        await MainActor.run {
+            self.isLoading = true
+            self.uploadProgress = 0
+        }
+        
+        defer {
+            Task { @MainActor in
+                self.isLoading = false
+            }
+        }
         
         do {
             // Upload images first
             var imageURLs: [String] = []
             for (index, image) in images.enumerated() {
-                guard let imageData = image.jpegData(compressionQuality: 0.7) else { continue }
-                let imageURL = try await uploadImage(imageData, index: index, storyId: UUID().uuidString)
+                // Process image data in background
+                let imageData = await Task.detached(priority: .userInitiated) { () -> Data? in
+                    return image.jpegData(compressionQuality: 0.7)
+                }.value
+                
+                guard let data = imageData else { continue }
+                
+                let imageURL = try await uploadImage(data, index: index, storyId: UUID().uuidString)
                 imageURLs.append(imageURL)
                 
                 await MainActor.run {
-                    uploadProgress = Double(index + 1) / Double(images.count)
+                    self.uploadProgress = Double(index + 1) / Double(images.count)
                 }
             }
             
             // Create story document
             let story = Story(
-                id: nil, // Firestore will generate this
+                id: nil,
                 familyTreeID: familyTreeId,
                 authorID: creatorUserId,
                 coverImageURL: imageURLs.first,
@@ -44,12 +58,15 @@ class AddStoryViewModel: ObservableObject {
                 peopleInvolved: [],
                 likes: [],
                 tags: [],
-                createdAt: nil, // Firestore will set this
-                updatedAt: nil  // Firestore will set this
+                createdAt: nil,
+                updatedAt: nil
             )
             
-            let docRef = db.collection("stories").document()
-            try docRef.setData(from: story)
+            // Perform Firestore write in background
+            try await Task.detached(priority: .userInitiated) {
+                let docRef = self.db.collection("stories").document()
+                try docRef.setData(from: story)
+            }.value
             
         } catch {
             await MainActor.run {
@@ -66,14 +83,26 @@ class AddStoryViewModel: ObservableObject {
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
         
-        _ = try await imageRef.putDataAsync(imageData, metadata: metadata) { progress in
-            if let progress = progress {
-                Task { @MainActor in
-                    self.uploadProgress = Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
+        // Upload with progress tracking
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let uploadTask = imageRef.putData(imageData, metadata: metadata) { metadata, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+            
+            uploadTask.observe(.progress) { snapshot in
+                if let progress = snapshot.progress {
+                    Task { @MainActor in
+                        self.uploadProgress = Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
+                    }
                 }
             }
         }
         
+        // Get download URL after upload completes
         let downloadURL = try await imageRef.downloadURL()
         return downloadURL.absoluteString
     }

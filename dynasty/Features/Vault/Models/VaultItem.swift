@@ -53,7 +53,7 @@ struct VaultItem: Identifiable, Codable, Hashable {
     let description: String?
     let fileType: VaultItemType
     let encryptedFileName: String
-    let storagePath: String
+    var storagePath: String
     let thumbnailURL: String?
     var metadata: VaultItemMetadata
     let createdAt: Date

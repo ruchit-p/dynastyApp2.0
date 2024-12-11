@@ -604,19 +604,17 @@ class AuthManager: ObservableObject {
     }
     
     // Add method to check biometric availability
-    func checkBiometricAvailability() -> (available: Bool, type: LABiometryType, error: String?) {
+    func checkBiometricAvailability() -> (Bool, LABiometryType, Error?) {
         let context = LAContext()
         var error: NSError?
         
-        let available = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
-        logger.info("Biometric availability check - Available: \(available), Type: \(context.biometryType.rawValue)")
-        
-        if let error = error {
-            logger.error("Biometric availability check failed: \(error.localizedDescription)")
-            return (false, .none, error.localizedDescription)
+        // Check if biometric authentication is possible
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            return (true, context.biometryType, error)
+        } else {
+            // Biometric authentication is not available or not configured
+            return (false, .none, error)
         }
-        
-        return (available, context.biometryType, nil)
     }
     
     // Add method to validate user session

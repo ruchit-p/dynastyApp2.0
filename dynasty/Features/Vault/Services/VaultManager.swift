@@ -4,6 +4,7 @@ import CryptoKit
 import os.log
 import UniformTypeIdentifiers
 import FirebaseFirestore
+import FirebaseStorage
 
 
 enum VaultError: LocalizedError {
@@ -188,20 +189,43 @@ class VaultManager: ObservableObject {
     }
     
     func unlock() async throws {
-        guard let user = currentUser, let userId = user.id else {
-            throw VaultError.authenticationFailed("No authenticated user found")
+        guard let userId = currentUser?.id else {
+            throw VaultError.authenticationFailed("User not authenticated")
         }
         
-        try await authenticateUser()
+        guard !isLocked else { return }
         
-        do {
-            try await dbManager.openDatabase(for: userId)
-            try await loadItems(for: userId)
-            isLocked = false
-            logger.info("Vault unlocked successfully for user: \(userId)")
-        } catch {
-            logger.error("Failed to unlock vault after authentication: \(error.localizedDescription)")
-            throw error
+        let context = LAContext()
+        var error: NSError?
+        
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            isAuthenticating = true // Start authenticating
+            let reason = "Unlock your vault"
+            
+            do {
+                let success = try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
+                if success {
+                    await MainActor.run {
+                        self.isLocked = false
+                        self.isAuthenticating = false // Authentication finished
+                        logger.info("Vault unlocked successfully")
+                    }
+                } else {
+                    await MainActor.run {
+                        self.isAuthenticating = false // Authentication finished
+                    }
+                    throw VaultError.authenticationFailed("Biometric authentication failed")
+                }
+            } catch {
+                await MainActor.run {
+                    self.isAuthenticating = false // Authentication finished
+                }
+                logger.error("Biometric authentication error: \(error.localizedDescription)")
+                throw VaultError.authenticationFailed(error.localizedDescription)
+            }
+        } else if let error = error {
+            logger.error("Biometric authentication not available: \(error.localizedDescription)")
+            throw VaultError.authenticationFailed(error.localizedDescription)
         }
     }
     
@@ -451,7 +475,7 @@ func permanentlyDeleteItem(_ item: VaultItem) async throws {
         fileType: VaultItemType,
         metadata: VaultItemMetadata,
         userId: String,
-        parentFolderId: String? = nil
+        parentFolderId: String?
     ) async throws {
         guard !isLocked else {
             throw VaultError.vaultLocked
@@ -459,23 +483,15 @@ func permanentlyDeleteItem(_ item: VaultItem) async throws {
         
         logger.info("Starting import for file: \(filename)")
         
-        // Generate storage path
-        var storagePath = "users/\(userId)/files/\(filename)"
-        
-        // Encrypt the data
-        let encryptedData = try encryptionService.encryptFile(data: data, userId: userId, keyId: metadata.encryptionKeyId)
-        
-        // Upload to Firebase Storage
-        storagePath = try await storageService.uploadEncryptedData(encryptedData, fileName: filename, userId: userId)
-        
-        let item = VaultItem(
+        // Create a new VaultItem
+        let newItem = VaultItem(
             id: UUID().uuidString,
             userId: userId,
-            title: metadata.originalFileName,
+            title: filename,
             description: nil,
             fileType: fileType,
-            encryptedFileName: filename,
-            storagePath: storagePath,
+            encryptedFileName: "\(UUID().uuidString).enc",
+            storagePath: "", // Placeholder, will be updated after upload
             thumbnailURL: nil,
             metadata: metadata,
             createdAt: Date(),
@@ -484,10 +500,59 @@ func permanentlyDeleteItem(_ item: VaultItem) async throws {
             parentFolderId: parentFolderId
         )
         
-        items.append(item)
-        try await dbManager.saveItems(items, for: userId)
-        clearItemsCache()
-        logger.info("Successfully imported data")
+        // Encrypt the data
+        let encryptedData = try encryptionService.encryptFile(
+            data: data, // Corrected argument label
+            userId: userId,
+            keyId: metadata.encryptionKeyId
+        )
+
+        // Create StorageMetadata
+        let storageMetadata = StorageMetadata()
+        storageMetadata.contentType = metadata.mimeType
+        storageMetadata.customMetadata = [
+            "originalFileName": metadata.originalFileName,
+            "fileSize": String(metadata.fileSize),
+            "encryptionKeyId": metadata.encryptionKeyId,
+            "hash": metadata.hash
+        ]
+
+        // Upload the encrypted data with progress handling
+        try await withCheckedThrowingContinuation { continuation in
+            FirebaseStorageService.shared.uploadEncryptedData(
+                encryptedData,
+                fileName: newItem.encryptedFileName, // Use the encryptedFileName from newItem
+                userId: userId,
+                progressHandler: { progress in
+                    // Update your UI with the upload progress
+                    print("Upload progress for \(filename): \(progress)%")
+                }
+            ) { result in
+                switch result {
+                case .success(let storagePath):
+                    // Update the VaultItem with the storage path
+                    var updatedItem = newItem
+                    updatedItem.storagePath = storagePath
+                    
+                    // Save the updated item to Firestore
+                    Task {
+                        do {
+                            try await FirestoreDatabaseManager.shared.saveItems([updatedItem], for: userId)
+                            
+                            // Clear items cache and refresh items
+                            await self.clearItemsCache()
+                            try await self.refreshItems()
+                            
+                            continuation.resume()
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
     
     // MARK: - Private Helper Methods
@@ -689,5 +754,16 @@ func permanentlyDeleteItem(_ item: VaultItem) async throws {
         } catch {
             logger.error("Failed to clear disk cache: \(error.localizedDescription)")
         }
+    }
+    
+    func refreshItems() async throws {
+        guard let userId = currentUser?.id else {
+            throw VaultError.authenticationFailed("No authenticated user")
+        }
+        
+        logger.info("Refreshing vault items for user: \(userId)")
+        clearItemsCache() // Clear the cache to ensure fresh data
+        try await loadItems(for: userId, sortOption: .name, isAscending: true)
+        logger.info("Successfully refreshed vault items")
     }
 }

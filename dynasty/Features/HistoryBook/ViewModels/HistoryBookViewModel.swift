@@ -9,9 +9,19 @@ class HistoryBookViewModel: ObservableObject {
     
     private let db = FirestoreManager.shared.getDB()
     
+    @MainActor
+    private func setLoading(_ value: Bool) {
+        isLoading = value
+    }
+    
+    @MainActor
+    private func setError(_ error: Error) {
+        self.error = error
+    }
+    
     func fetchStories(familyTreeID: String, currentUserId: String) async {
-        isLoading = true
-        defer { isLoading = false }
+        await setLoading(true)
+        defer { Task { @MainActor in self.isLoading = false } }
         
         do {
             // Fetch public stories
@@ -35,27 +45,24 @@ class HistoryBookViewModel: ObservableObject {
             allStories.append(contentsOf: privateSnapshot.documents.compactMap { try? $0.data(as: Story.self) })
             
             // Sort combined results by creation date
+            let sortedStories = allStories.sorted(by: { ($0.createdAt ?? Date()) > ($1.createdAt ?? Date()) })
             await MainActor.run {
-                self.stories = allStories.sorted(by: { ($0.createdAt ?? Date()) > ($1.createdAt ?? Date()) })
+                self.stories = sortedStories
             }
         } catch {
-            await MainActor.run {
-                self.error = error
-            }
+            await setError(error)
         }
     }
     
     func addStory(_ story: Story) async throws {
-        isLoading = true
-        defer { isLoading = false }
+        await setLoading(true)
+        defer { Task { @MainActor in self.isLoading = false } }
         
         do {
             let docRef = db.collection("stories").document()
             try await docRef.setData(from: story)
         } catch {
-            await MainActor.run {
-                self.error = error
-            }
+            await setError(error)
             throw error
         }
     }
@@ -65,29 +72,25 @@ class HistoryBookViewModel: ObservableObject {
             throw NSError(domain: "HistoryBook", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid story ID"])
         }
         
-        isLoading = true
-        defer { isLoading = false }
+        await setLoading(true)
+        defer { Task { @MainActor in self.isLoading = false } }
         
         do {
             try await db.collection("stories").document(storyId).setData(from: story)
         } catch {
-            await MainActor.run {
-                self.error = error
-            }
+            await setError(error)
             throw error
         }
     }
     
     func deleteStory(_ storyId: String) async throws {
-        isLoading = true
-        defer { isLoading = false }
+        await setLoading(true)
+        defer { Task { @MainActor in self.isLoading = false } }
         
         do {
             try await db.collection("stories").document(storyId).delete()
         } catch {
-            await MainActor.run {
-                self.error = error
-            }
+            await setError(error)
             throw error
         }
     }

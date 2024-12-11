@@ -18,11 +18,13 @@ struct VaultLockedView: View {
 
             Button(action: {
                 Task {
-                    do {
-                        try await vaultManager.unlock()
-                    } catch {
-                        self.error = error
-                        self.showError = true
+                    // Ensure you're passing the current user's ID here
+                    if let userId = authManager.user?.id {
+                        VaultAuthenticationFunctions.authenticate(userId: userId, vaultManager: vaultManager)
+                    } else {
+                        // Handle the case where the user ID is not available
+                        error = VaultError.authenticationFailed("User not found")
+                        showError = true
                     }
                 }
             }) {

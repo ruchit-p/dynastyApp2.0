@@ -193,12 +193,12 @@ struct VaultItemDetailView: View {
                 await loadPreview()
             }
         }
-        .onChange(of: vaultManager.items) { newItems in
+        .onChange(of: vaultManager.items) { oldItems, newItems in
             if let updatedItem = newItems.first(where: { $0.id == document.id }) {
                 document = updatedItem
             }
         }
-        .onChange(of: showFilePreview) { newValue in
+        .onChange(of: showFilePreview) { oldValue, newValue in
             if !newValue {
                 if let url = previewURL {
                     try? FileManager.default.removeItem(at: url)
