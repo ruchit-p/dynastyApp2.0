@@ -6,11 +6,11 @@ import Combine
 class FamilyTreeViewModel: ObservableObject {
     @Published private(set) var nodes: [String: FamilyTreeNode] = [:]
     @Published private(set) var isLoading = false
-    @Published private(set) var error: Error?
+    @Published var error: Error?
     @Published var selectedNodeId: String?
     @Published var isEditMode = false
     
-    private let db = Firestore.firestore()
+    private let db = FirestoreManager.shared.getDB()
     private var cancellables = Set<AnyCancellable>()
     private let treeId: String
     private let userId: String

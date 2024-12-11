@@ -8,7 +8,7 @@ class VaultFileManagementFunctions {
         switch result {
         case .success(let urls):
             do {
-                guard let userId = vaultManager.currentUser?.id else { return }
+                guard let userId = await vaultManager.currentUser?.id else { return }
                 try await vaultManager.importItems(from: urls, userId: userId, parentFolderId: currentFolderId)
             } catch {
                 logger.error("Failed to import files: \(error)")
@@ -29,7 +29,7 @@ class VaultFileManagementFunctions {
             throw VaultError.invalidData("Folder name cannot be empty")
         }
         
-        guard let userId = vaultManager.currentUser?.id else {
+        guard let userId = await vaultManager.currentUser?.id else {
             throw VaultError.authenticationFailed("User not authenticated")
         }
         
@@ -44,12 +44,12 @@ class VaultFileManagementFunctions {
         )
         
         try await vaultManager.createFolder(named: name, parentFolderId: currentFolderId)
-        vaultManager.clearItemsCache()
+        await vaultManager.clearItemsCache()
         try await refreshItems(vaultManager: vaultManager)
     }
     
     static func refreshItems(vaultManager: VaultManager, sortOption: SortOption = .date, isAscending: Bool = false) async throws {
-        guard let userId = vaultManager.currentUser?.id else {
+        guard let userId = await vaultManager.currentUser?.id else {
             logger.error("Cannot refresh: No authenticated user")
             throw VaultError.authenticationFailed("Please sign in to access your vault")
         }

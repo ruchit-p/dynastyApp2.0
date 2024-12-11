@@ -6,12 +6,11 @@ import OSLog
 
 struct UserProfileEditView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var user: User
+    @StateObject private var viewModel: UserProfileEditViewModel
     @State private var firstName: String
     @State private var lastName: String
     @State private var email: String
     @State private var phoneNumber: String
-    let db = Firestore.firestore()
     @State private var isShowingImagePicker = false
     @State private var selectedImage: UIImage?
     @State private var isUploading = false
@@ -24,7 +23,7 @@ struct UserProfileEditView: View {
     private let logger = Logger(subsystem: "com.dynasty.UserProfileEditView", category: "Profile")
 
     init(currentUser: User) {
-        self._user = State(initialValue: currentUser)
+        self._viewModel = StateObject(wrappedValue: UserProfileEditViewModel(user: currentUser))
         self._firstName = State(initialValue: currentUser.firstName ?? "")
         self._lastName = State(initialValue: currentUser.lastName ?? "")
         self._email = State(initialValue: currentUser.email)
@@ -43,7 +42,7 @@ struct UserProfileEditView: View {
                                 .scaledToFit()
                                 .frame(width: 150, height: 150)
                                 .clipShape(Circle())
-                        } else if let photoURL = user.photoURL, let url = URL(string: photoURL) {
+                        } else if let user = viewModel.user, let photoURL = user.photoURL, let url = URL(string: photoURL) {
                             AsyncImage(url: url) { image in
                                 image.resizable()
                             } placeholder: {
@@ -91,6 +90,13 @@ struct UserProfileEditView: View {
             .alert(isPresented: $showAlert) {
                 Alert(title: Text("Error"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
             }
+            .overlay(Group {
+                if viewModel.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.3))
+                }
+            })
         }
     }
 
@@ -100,12 +106,13 @@ struct UserProfileEditView: View {
             showAlert(message: "User not authenticated.")
             return
         }
-        let userRef = db.collection("users").document(uid)
 
-        user.firstName = firstName
-        user.lastName = lastName
-        user.email = email
-        user.phoneNumber = phoneNumber
+        var updatedData: [String: Any] = [
+            "firstName": firstName,
+            "lastName": lastName,
+            "email": email,
+            "phoneNumber": phoneNumber
+        ]
 
         if let selectedImage = selectedImage {
             isUploading = true
@@ -113,35 +120,34 @@ struct UserProfileEditView: View {
                 isUploading = false
                 switch result {
                 case .success(let photoURL):
-                    self.user.photoURL = photoURL
-                    self.saveUserData(userRef: userRef)
+                    updatedData["photoURL"] = photoURL
+                    saveUserData(userId: uid, data: updatedData)
                 case .failure(let error):
                     logger.error("Image upload failed: \(error.localizedDescription)")
                     showAlert(message: "Failed to upload image. Please try again.")
                 }
             }
         } else {
-            saveUserData(userRef: userRef)
+            saveUserData(userId: uid, data: updatedData)
         }
     }
 
-    private func saveUserData(userRef: DocumentReference) {
-        do {
-            try userRef.setData(from: user) { error in
-                if let error = error {
-                    logger.error("Error saving user data: \(error.localizedDescription)")
-                    showAlert(message: "Failed to save profile. Please try again.")
-                } else {
-                    logger.info("User data saved successfully.")
+    private func saveUserData(userId: String, data: [String: Any]) {
+        Task {
+            do {
+                try await viewModel.updateProfile(userId: userId, updatedData: data)
+                await MainActor.run {
                     dismiss()
                     Task {
                         await authManager.fetchAndUpdateUser()
                     }
                 }
+            } catch {
+                await MainActor.run {
+                    logger.error("Error saving user data: \(error.localizedDescription)")
+                    showAlert(message: "Failed to save profile. Please try again.")
+                }
             }
-        } catch {
-            logger.error("Error encoding user data: \(error.localizedDescription)")
-            showAlert(message: "Failed to save profile. Please try again.")
         }
     }
 
@@ -153,7 +159,7 @@ struct UserProfileEditView: View {
         }
 
         let storageRef = Storage.storage().reference()
-        let photoRef = storageRef.child("profile_images/\(user.id ?? UUID().uuidString).jpg")
+        let photoRef = storageRef.child("profile_images/\(viewModel.user?.id ?? UUID().uuidString).jpg")
 
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
@@ -179,12 +185,6 @@ struct UserProfileEditView: View {
         uploadTask.observe(.progress) { snapshot in
             uploadProgress = Double(snapshot.progress?.completedUnitCount ?? 0) / Double(snapshot.progress?.totalUnitCount ?? 1)
         }
-    }
-
-    func loadImage() {
-        guard let selectedImage = selectedImage else { return }
-        logger.info("Image selected for profile.")
-        // Update the UI or model as needed
     }
     
     private func showAlert(message: String) {

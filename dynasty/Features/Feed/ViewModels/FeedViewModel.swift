@@ -4,25 +4,16 @@ import FirebaseFirestore
 
 class FeedViewModel: ObservableObject {
     @Published var posts: [Post] = []
-    private let db = Firestore.firestore()
+    @Published var isLoading = false
+    @Published var error: Error?
+    private let db = FirestoreManager.shared.getDB()
     
     init() {
         loadPosts()
     }
     
-    private func loadPosts() {
-        // Example data - replace with your actual data source
-        posts = [
-            Post(
-                username: "Ruchtp",
-                date: Timestamp(date: Date()),
-                caption: "Introducing the newest addition to the family, Rovely the Labrador!",
-                imageURL: "your-image-url",
-                timestamp: Timestamp(date: Date())
-            )
-        ]
-        
-        // Fetch actual posts from Firestore
+    func loadPosts() {
+        isLoading = true
         fetchPostsFromFirestore()
     }
     
@@ -30,18 +21,69 @@ class FeedViewModel: ObservableObject {
         db.collection("posts")
             .order(by: "timestamp", descending: true)
             .getDocuments { [weak self] snapshot, error in
-                if let error = error {
-                    print("Error fetching posts: \(error.localizedDescription)")
-                    return
-                }
-
-                let fetchedPosts = snapshot?.documents.compactMap { document in
-                    try? document.data(as: Post.self)
-                } ?? []
-
                 DispatchQueue.main.async {
-                    self?.posts = fetchedPosts
+                    self?.isLoading = false
+                    if let error = error {
+                        self?.error = error
+                        return
+                    }
+
+                    self?.posts = snapshot?.documents.compactMap { document in
+                        try? document.data(as: Post.self)
+                    } ?? []
                 }
             }
+    }
+    
+    func addPost(post: Post) async throws {
+        isLoading = true
+        defer { isLoading = false }
+        
+        do {
+            let docRef = db.collection("posts").document()
+            try await docRef.setData(from: post)
+            await MainActor.run {
+                loadPosts()
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error
+            }
+            throw error
+        }
+    }
+    
+    func deletePost(postId: String) async throws {
+        isLoading = true
+        defer { isLoading = false }
+        
+        do {
+            try await db.collection("posts").document(postId).delete()
+            await MainActor.run {
+                loadPosts()
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error
+            }
+            throw error
+        }
+    }
+    
+    func updatePost(postId: String, updatedData: [String: Any]) async throws {
+        isLoading = true
+        defer { isLoading = false }
+        
+        do {
+            try await db.collection("posts").document(postId).updateData(updatedData)
+            await MainActor.run {
+                loadPosts()
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error
+            }
+            throw error
+        }
     }
 } 

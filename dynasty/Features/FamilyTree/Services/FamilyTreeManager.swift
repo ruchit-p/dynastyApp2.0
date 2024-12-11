@@ -3,7 +3,7 @@ import FirebaseAuth
 
 class FamilyTreeManager {
     static let shared = FamilyTreeManager()
-    private let db = Firestore.firestore()
+    private let db = FirestoreManager.shared.getDB()
     
     private init() {}
     
@@ -155,7 +155,7 @@ class FamilyTreeManager {
                         toMember: FamilyMember,
                         type: RelationType,
                         familyTreeId: String) async throws {
-        let db = Firestore.firestore()
+        let db = FirestoreManager.shared.getDB()
         let batch = db.batch()
         
         // Create primary relationship

@@ -5,7 +5,7 @@ import os.log
 class FirestoreDatabaseManager {
     static let shared = FirestoreDatabaseManager()
     
-    private let db = Firestore.firestore()
+    private let db = FirestoreManager.shared.getDB()
     private let logger = Logger(subsystem: "com.dynasty.FirestoreDatabaseManager", category: "Database")
     
     private init() {}

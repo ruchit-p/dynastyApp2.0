@@ -1,54 +1,99 @@
 import SwiftUI
 import Firebase
+import FirebaseAuth
 
 struct SendInvitationView: View {
+    @StateObject private var viewModel = SendInvitationViewModel()
     @State private var inviteEmail: String = ""
-    @State private var errorMessage: String?
-    @Environment(\.presentationMode) var presentationMode
-
-    var familyTreeID: String
-
+    @Environment(\.dismiss) var dismiss
+    let familyTreeID: String
+    
     var body: some View {
         VStack {
             TextField("Email Address", text: $inviteEmail)
                 .keyboardType(.emailAddress)
                 .autocapitalization(.none)
                 .padding()
-
+            
             Button("Send Invitation") {
                 sendInvitation()
             }
             .padding()
-
-            if let errorMessage = errorMessage {
-                Text(errorMessage)
+            .disabled(viewModel.isLoading)
+            
+            if let error = viewModel.error {
+                Text(error.localizedDescription)
                     .foregroundColor(.red)
+                    .padding()
+            }
+            
+            if !viewModel.invitations.isEmpty {
+                List {
+                    Section(header: Text("Pending Invitations")) {
+                        ForEach(viewModel.invitations) { invitation in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(invitation.email)
+                                        .font(.headline)
+                                    Text("Invited by: \(invitation.invitedBy)")
+                                        .font(.caption)
+                                }
+                                Spacer()
+                                Button(action: {
+                                    cancelInvitation(invitation.id ?? "")
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if viewModel.isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.3))
             }
         }
         .padding()
+        .onAppear {
+            Task {
+                await viewModel.fetchInvitations(for: familyTreeID)
+            }
+        }
     }
-
-    func sendInvitation() {
-        let db = Firestore.firestore()
-        let referralCode = UUID().uuidString
-        let expiresAt = Timestamp(date: Date().addingTimeInterval(7 * 24 * 60 * 60)) // 7 days from now
-
-        let invitationData: [String: Any] = [
-            "email": inviteEmail,
-            "familyTreeID": familyTreeID,
-            "referralCode": referralCode,
-            "expiresAt": expiresAt,
-            "accepted": false
-        ]
-
-        db.collection("invitations").addDocument(data: invitationData) { error in
-            if let error = error {
-                self.errorMessage = "Failed to send invitation: \(error.localizedDescription)"
-            } else {
-                // Optionally, send an email to the user with the referral code.
-                // This could be handled via a backend service or cloud function.
-
-                self.presentationMode.wrappedValue.dismiss()
+    
+    private func sendInvitation() {
+        guard !inviteEmail.isEmpty else { return }
+        
+        Task {
+            do {
+                try await viewModel.sendInvitation(
+                    to: inviteEmail,
+                    familyTreeId: familyTreeID,
+                    invitedBy: Auth.auth().currentUser?.displayName ?? "Unknown"
+                )
+                await MainActor.run {
+                    inviteEmail = ""
+                    dismiss()
+                }
+            } catch {
+                // Error is already handled by the ViewModel
+                print("Failed to send invitation: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func cancelInvitation(_ invitationId: String) {
+        Task {
+            do {
+                try await viewModel.cancelInvitation(invitationId)
+                await viewModel.fetchInvitations(for: familyTreeID)
+            } catch {
+                // Error is already handled by the ViewModel
+                print("Failed to cancel invitation: \(error.localizedDescription)")
             }
         }
     }

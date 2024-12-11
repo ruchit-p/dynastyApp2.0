@@ -11,105 +11,103 @@ struct VaultView: View {
     @State private var error: Error?
     @State private var showError = false
     @Environment(\.scenePhase) private var scenePhase
+    @State private var searchText = ""
+    @State private var selectedType: VaultItemType?
+    @State private var currentFolderId: String?
+    @State private var isSelecting = false
+    @State private var selectedItems = Set<VaultItem>()
+    @State private var showPhotoPickerSheet = false
+    @State private var showFilePicker = false
+    @State private var showCameraScannerSheet = false
+    @State private var showNewFolderPrompt = false
+    @State private var showCameraPicker = false
+    @State private var newFolderName = ""
+    @State private var navigationPath = NavigationPath()
+    @State private var sortOption: SortOption = .date
+    @State private var isAscending = false
     
     private let logger = Logger(subsystem: "com.dynasty.VaultView", category: "UI")
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: UIDevice.current.userInterfaceIdiom == .pad ? 4 : 3)
 
     var body: some View {
         if vaultManager.isLocked {
             VaultLockedView(error: $error, showError: $showError)
         } else {
             NavigationStack {
-                VaultContentView(
-                    selectedPhotos: $selectedPhotos,
-                    currentFolderId: nil
-                )
+                VStack(spacing: 0) {
+                    VaultHeader(searchText: $searchText, selectedType: $selectedType, currentFolderId: currentFolderId)
+                    
+                    VaultItemGrid(
+                        selectedPhotos: $selectedPhotos,
+                        isSelecting: $isSelecting,
+                        selectedItems: $selectedItems,
+                        error: $error,
+                        showError: $showError,
+                        refreshItems: {
+                            do {
+                                try await VaultFileManagementFunctions.refreshItems(
+                                    vaultManager: vaultManager,
+                                    sortOption: sortOption,
+                                    isAscending: isAscending
+                                )
+                            } catch {
+                                self.error = error
+                                showError = true
+                            }
+                        },
+                        filteredItems: filteredItems,
+                        columns: columns
+                    )
+                }
+                .overlay(alignment: .bottom) {
+                    VaultToolbar(
+                        showPhotoPickerSheet: $showPhotoPickerSheet,
+                        showFilePicker: $showFilePicker,
+                        showCameraScannerSheet: $showCameraScannerSheet,
+                        showNewFolderPrompt: $showNewFolderPrompt,
+                        showCameraPicker: $showCameraPicker,
+                        isSelecting: $isSelecting,
+                        selectedItems: $selectedItems,
+                        newFolderName: $newFolderName,
+                        createNewFolder: {
+                            Task {
+                                do {
+                                    try await VaultFileManagementFunctions.createNewFolder(
+                                        name: newFolderName,
+                                        currentFolderId: currentFolderId,
+                                        vaultManager: vaultManager
+                                    )
+                                    newFolderName = ""
+                                } catch {
+                                    self.error = error
+                                    showError = true
+                                }
+                            }
+                        },
+                        filteredItems: filteredItems,
+                        navigationPath: navigationPath
+                    )
+                }
+                .navigationTitle(currentFolderName ?? "Vault")
+                .navigationBarTitleDisplayMode(currentFolderId == nil ? .large : .inline)
             }
-            .alert("Error", isPresented: $showError, presenting: error) { _ in
-                Button("OK", role: .cancel) {}
-            } message: { error in
-                Text(error.localizedDescription)
-            }
-            .onChange(of: scenePhase) {
-                VaultSceneHandlingFunctions.handleScenePhaseChange(to: scenePhase, vaultManager: vaultManager)
+            .photosPicker(isPresented: $showPhotoPickerSheet, selection: $selectedPhotos)
+            .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item]) { result in
+                Task {
+                    switch result {
+                    case .success(let url):
+                        await VaultFileManagementFunctions.handleFileImport(.success([url]), vaultManager: vaultManager, currentFolderId: currentFolderId)
+                        case .failure(let error):
+                        await VaultFileManagementFunctions.handleFileImport(.failure(error), vaultManager: vaultManager, currentFolderId: currentFolderId)
+                    }
+                }
             }
             .onChange(of: selectedPhotos) {
                 Task {
                     await VaultPhotoHandlingFunctions.handleSelectedPhotos(selectedPhotos, vaultManager: vaultManager, authManager: authManager)
                 }
             }
-            .onChange(of: authManager.user) {
-                VaultAuthenticationFunctions.handleUserChange(authManager.user, vaultManager: vaultManager)
-            }
-            .onAppear {
-                Task {
-                    do {
-                        try await authManager.validateSession()
-                        
-                        if let user = authManager.user {
-                            vaultManager.setCurrentUser(user)
-                        }
-                    } catch {
-                        self.error = error
-                        self.showError = true
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("VaultAuthenticationError"))) { notification in
-                if let error = notification.object as? Error {
-                    self.error = error
-                    self.showError = true
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("VaultPhotoError"))) { notification in
-                if let error = notification.object as? Error {
-                    self.error = error
-                    self.showError = true
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("VaultFileError"))) { notification in
-                if let error = notification.object as? Error {
-                    self.error = error
-                    self.showError = true
-                }
-            }
-        }
-    }
-}
-
-struct VaultContentView: View {
-    @EnvironmentObject private var vaultManager: VaultManager
-    @EnvironmentObject private var cameraService: CameraService
-    @Binding var selectedPhotos: [PhotosPickerItem]
-    var currentFolderId: String?
-    
-    @State private var searchText = ""
-    @State private var isSelecting = false
-    @State private var selectedItems = Set<VaultItem>()
-    @State private var showShareSheet = false
-    @State private var shareSheetItems: [URL] = []
-    @State private var showDeleteConfirmation = false
-    @State private var showNewFolderPrompt = false
-    @State private var newFolderName = ""
-    @State private var error: Error?
-    @State private var showError = false
-    @State private var showPhotoPickerSheet = false
-    @State private var showFilePicker = false
-    @State private var showCameraScannerSheet = false
-    @State private var showCameraPicker = false
-    @State private var showScannedDocumentNamePrompt = false
-    @State private var scannedDocumentName = ""
-    @State private var scannedImages: [UIImage] = []
-    @State private var selectedType: VaultItemType? = nil
-    @State private var navigationPath = NavigationPath()
-    @State private var currentSortOption: SortOption = .date
-    @State private var isSortAscending = false
-    
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: UIDevice.current.userInterfaceIdiom == .pad ? 4 : 3)
-    private let logger = Logger(subsystem: "com.dynasty.VaultContentView", category: "UI")
-    
-    private func handleFileImport(_ result: Result<[URL], Error>) {
-        Task {
-            await VaultFileManagementFunctions.handleFileImport(result, vaultManager: vaultManager, currentFolderId: currentFolderId)
+            .errorOverlay(error: error, isPresented: $showError)
         }
     }
     
@@ -121,144 +119,38 @@ struct VaultContentView: View {
         return nil
     }
     
-    private var filteredItems: [VaultItem] {    
-        let notDeletedItems = vaultManager.items.filter { !$0.isDeleted }
-        let itemsInCurrentFolder = filterItemsByFolder(notDeletedItems)
-        let itemsMatchingSearch = filterItemsBySearchText(itemsInCurrentFolder)
-        let itemsMatchingType = filterItemsByType(itemsMatchingSearch)
-        return itemsMatchingType
+    private var filteredItems: [VaultItem] {
+        var items = vaultManager.items.filter { !$0.isDeleted }
+        items = filterItemsByFolder(items)
+        items = filterItemsBySearchText(items)
+        items = filterItemsByType(items)
+        return items
     }
-
     
-    // View to handle navigation destination
-    struct ItemDestinationView: View {
-        @Binding var selectedPhotos: [PhotosPickerItem]
-        let item: VaultItem
-
-        var body: some View {
-            Group {
-                if item.fileType == .folder {
-                    VaultContentView(selectedPhotos: $selectedPhotos, currentFolderId: item.id)
-                } else {
-                    VaultItemDetailView(document: item)
-                }
+    private func filterItemsByFolder(_ items: [VaultItem]) -> [VaultItem] {
+        items.filter { item in
+            if let folderId = currentFolderId {
+                return item.parentFolderId == folderId
+            } else {
+                return item.parentFolderId == nil
             }
         }
     }
-    
-    var body: some View {
-        NavigationStack(path: $navigationPath) {
-            VStack {
-                VaultHeader(searchText: $searchText, selectedType: $selectedType)
-                VaultGrid(
-                    selectedPhotos: $selectedPhotos,
-                    selectedItems: $selectedItems,
-                    filteredItems: filteredItems,
-                    columns: columns
-                )
-            }
-            .overlay(alignment: .bottomTrailing) {
-                VaultFooter(
-                    showPhotoPickerSheet: $showPhotoPickerSheet,
-                    showFilePicker: $showFilePicker,
-                    showCameraScannerSheet: $showCameraScannerSheet,
-                    showNewFolderPrompt: $showNewFolderPrompt,
-                    showCameraPicker: $showCameraPicker
-                )
-            }
-            .navigationTitle(currentFolderName ?? "Vault")
-            .navigationBarTitleDisplayMode(currentFolderId == nil ? .large : .inline)
-            .toolbar {
-                TrailingToolbarContent(
-                    isSelecting: $isSelecting,
-                    showNewFolderPrompt: $showNewFolderPrompt,
-                    newFolderName: $newFolderName,
-                    selectedItems: $selectedItems,
-                    currentSortOption: $currentSortOption,
-                    isSortAscending: $isSortAscending,
-                    filteredItemsCount: filteredItems.count,
-                    navigationPath: $navigationPath,
-                    createNewFolder: createNewFolder
-                )
-            }
-            .sheet(isPresented: $showShareSheet) {
-                ShareSheet(activityItems: shareSheetItems) { _, _, _, _ in
-                    // Cleanup temporary files
-                    for url in shareSheetItems {
-                        try? FileManager.default.removeItem(at: url)
-                    }
-                    shareSheetItems.removeAll()
-                }
-            }
-            .confirmationDialog("Select Action", isPresented: $isSelecting) {
-                if !selectedItems.isEmpty {
-                    Button("Download") {
-                        Task {
-                            await downloadSelectedItems()
-                        }
-                    }
-                    Button("Share") {
-                        Task {
-                            await shareSelectedItems()
-                        }
-                    }
-                    Button("Move to Trash", role: .destructive) {
-                        Task {
-                            await deleteSelectedItems()
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {
-                        isSelecting = false
-                        selectedItems.removeAll()
-                    }
-                }
-            } message: {
-                Text("\(selectedItems.count) items selected")
-            }
-            .onChange(of: isSelecting) {
-                if !isSelecting {
-                    selectedItems.removeAll()
-                }
-            }
-            .navigationDestination(for: VaultItem.self) { item in
-                ItemDestinationView(selectedPhotos: $selectedPhotos, item: item)
-            }
-            .navigationDestination(for: String.self) { value in
-                if value == "TrashView" {
-                    TrashView()
-                }
-            }
-            .sheet(isPresented: $showCameraPicker) {
-                ImagePicker(sourceType: .camera, currentFolderId: currentFolderId) { image in
-                    cameraService.handleImage(
-                        image: image,
-                        vaultManager: vaultManager,
-                        currentFolderId: currentFolderId
-                    )
-                }
-            }
-            .overlay {
-                if cameraService.isProcessing {
-                    Color.black.opacity(0.5)
-                        .edgesIgnoringSafeArea(.all)
-                        .overlay {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(1.5)
-                        }
-                }
-            }
-            .alert("Error", isPresented: $cameraService.showError, presenting: cameraService.error) { _ in
-                Button("OK", role: .cancel) {}
-            } message: { error in
-                Text(error.localizedDescription)
-            }
+
+    private func filterItemsBySearchText(_ items: [VaultItem]) -> [VaultItem] {
+        items.filter { item in
+            searchText.isEmpty ||
+            item.title.localizedCaseInsensitiveContains(searchText) ||
+            (item.description?.localizedCaseInsensitiveContains(searchText) ?? false)
         }
-        .navigationViewStyle(StackNavigationViewStyle())
+    }
+
+    private func filterItemsByType(_ items: [VaultItem]) -> [VaultItem] {
+        items.filter { item in
+            selectedType == nil || item.fileType == selectedType
+        }
     }
 }
-
-
 
 #Preview {
     VaultView()

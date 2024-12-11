@@ -3,117 +3,108 @@ import FirebaseFirestore
 import FirebaseAuth
 
 struct StoryDetailView: View {
-    let story: Story
+    @StateObject private var viewModel: StoryDetailViewModel
     let historyBookId: String
     @State private var showingShareSheet = false
-    @State private var isLiked: Bool = false
-    @State private var localLikes: [String] = []
     @Environment(\.dismiss) private var dismiss
-    let db = Firestore.firestore()
-    @State private var isLoading = false
-    @State private var errorMessage: String?
     
     private var currentUserId: String {
         Auth.auth().currentUser?.uid ?? ""
     }
     
+    init(story: Story, historyBookId: String) {
+        self.historyBookId = historyBookId
+        self._viewModel = StateObject(wrappedValue: StoryDetailViewModel(story: story))
+    }
+    
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Cover Image
-                if let coverImageURL = story.coverImageURL, let url = URL(string: coverImageURL) {
-                    AsyncImage(url: url) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        ProgressView()
-                    }
-                    .frame(height: 200)
-                    .clipped()
-                }
-                
-                // Story Title
-                Text(story.title)
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .padding(.horizontal)
-                
-                // Rendered Markdown Content
-                Text(tryAttributedString(from: story.content))
-                    .padding(.horizontal)
-                
-                // Like and Share buttons
-                HStack {
-                    Button(action: toggleLike) {
-                        HStack {
-                            Image(systemName: isLiked ? "heart.fill" : "heart")
-                                .foregroundColor(isLiked ? .red : .gray)
-                            if !localLikes.isEmpty {
-                                Text("\(localLikes.count)")
-                                    .foregroundColor(.gray)
-                            }
+                if viewModel.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = viewModel.error {
+                    Text(error.localizedDescription)
+                        .foregroundColor(.red)
+                        .padding()
+                } else if let story = viewModel.story {
+                    // Cover Image
+                    if let coverImageURL = story.coverImageURL, let url = URL(string: coverImageURL) {
+                        AsyncImage(url: url) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            ProgressView()
                         }
+                        .frame(height: 200)
+                        .clipped()
                     }
                     
-                    Button(action: { showingShareSheet = true }) {
-                        Image(systemName: "square.and.arrow.up")
-                            .foregroundColor(.gray)
+                    // Story Title
+                    Text(story.title)
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .padding(.horizontal)
+                    
+                    // Rendered Markdown Content
+                    Text(tryAttributedString(from: story.content))
+                        .padding(.horizontal)
+                    
+                    // Like and Share buttons
+                    HStack {
+                        Button(action: toggleLike) {
+                            HStack {
+                                Image(systemName: story.likes?.contains(currentUserId) ?? false ? "heart.fill" : "heart")
+                                    .foregroundColor(story.likes?.contains(currentUserId) ?? false ? .red : .gray)
+                                if let likes = story.likes, !likes.isEmpty {
+                                    Text("\(likes.count)")
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                        }
+                        
+                        Button(action: { showingShareSheet = true }) {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundColor(.gray)
+                        }
                     }
+                    .padding(.horizontal)
+                    
+                    Divider()
+                        .padding(.vertical)
+                    
+                    // Comments section
+                    CommentsSection(viewModel: viewModel, storyId: story.id ?? "")
                 }
-                .padding(.horizontal)
-                
-                Divider()
-                    .padding(.vertical)
-                
-                // Comments section
-                CommentsListView(historyBookId: historyBookId, storyId: story.id ?? "")
             }
             .padding(.top)
         }
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingShareSheet) {
-            ShareSheet(activityItems: [story.title, story.content])
+            if let story = viewModel.story {
+                ShareSheet(activityItems: [story.title, story.content])
+            }
         }
         .onAppear {
-            setupLikesListener()
-        }
-    }
-    
-    private func setupLikesListener() {
-        guard let storyId = story.id else { return }
-        
-        db.collection("stories").document(storyId)
-            .addSnapshotListener { documentSnapshot, error in
-                guard let document = documentSnapshot else {
-                    print("Error fetching story: \(error?.localizedDescription ?? "Unknown error")")
-                    return
+            if let storyId = viewModel.story?.id {
+                Task {
+                    await viewModel.fetchStory(storyId: storyId)
+                    await viewModel.fetchComments(storyId: storyId)
                 }
-                
-                self.localLikes = document.data()?["likes"] as? [String] ?? []
-                self.isLiked = self.localLikes.contains(self.currentUserId)
             }
+        }
     }
     
     private func toggleLike() {
-        guard let storyId = story.id else { return }
-        let storyRef = db.collection("stories").document(storyId)
+        guard let storyId = viewModel.story?.id else { return }
         
-        if isLiked {
-            storyRef.updateData([
-                "likes": FieldValue.arrayRemove([currentUserId])
-            ]) { error in
-                if let error = error {
-                    print("Error removing like: \(error.localizedDescription)")
-                }
-            }
-        } else {
-            storyRef.updateData([
-                "likes": FieldValue.arrayUnion([currentUserId])
-            ]) { error in
-                if let error = error {
-                    print("Error adding like: \(error.localizedDescription)")
-                }
+        Task {
+            do {
+                try await viewModel.updateStoryPrivacy(storyId: storyId, isPrivate: !(viewModel.story?.likes?.contains(currentUserId) ?? false))
+            } catch {
+                // Error is handled by ViewModel
+                print("Error toggling like: \(error.localizedDescription)")
             }
         }
     }
@@ -125,5 +116,96 @@ struct StoryDetailView: View {
             print("Error parsing Markdown: \(error.localizedDescription)")
             return AttributedString(markdown)
         }
+    }
+}
+
+struct CommentsSection: View {
+    @ObservedObject var viewModel: StoryDetailViewModel
+    let storyId: String
+    @State private var newComment: String = ""
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Comments")
+                .font(.headline)
+                .padding(.horizontal)
+            
+            ForEach(viewModel.comments) { comment in
+                CommentRow(comment: comment) {
+                    if let commentId = comment.id {
+                        Task {
+                            try? await viewModel.deleteComment(commentId, from: storyId)
+                        }
+                    }
+                }
+            }
+            
+            HStack {
+                TextField("Add a comment...", text: $newComment)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                
+                Button("Post") {
+                    submitComment()
+                }
+                .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal)
+        }
+    }
+    
+    private func submitComment() {
+        guard !newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        
+        let comment = Comment(
+            userID: Auth.auth().currentUser?.uid ?? "",
+            content: newComment,
+            authorName: Auth.auth().currentUser?.displayName ?? "Anonymous",
+            authorImageURL: Auth.auth().currentUser?.photoURL?.absoluteString,
+            likes: [],
+            mentions: nil,
+            attachments: nil
+        )
+        
+        Task {
+            do {
+                try await viewModel.addComment(comment, to: storyId)
+                newComment = ""
+            } catch {
+                // Error is handled by ViewModel
+                print("Error adding comment: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
+struct CommentRow: View {
+    let comment: Comment
+    let onDelete: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(comment.authorName)
+                    .font(.headline)
+                Spacer()
+                if comment.userID == Auth.auth().currentUser?.uid {
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+            Text(comment.content)
+                .font(.body)
+            if let createdAt = comment.createdAt {
+                Text(createdAt.formatted())
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+        .padding(.horizontal)
     }
 }

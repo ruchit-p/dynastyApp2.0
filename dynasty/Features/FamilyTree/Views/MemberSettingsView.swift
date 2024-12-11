@@ -2,12 +2,11 @@ import SwiftUI
 import FirebaseFirestore
 
 struct MemberSettingsView: View {
-    let member: FamilyMember
+    @StateObject private var viewModel: MemberSettingsViewModel
     let familyTreeID: String
     @Binding var isAdmin: Bool
     @Binding var canAddMembers: Bool
     @Environment(\.dismiss) private var dismiss
-    let db = Firestore.firestore()
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var showRemoveConfirmation = false
@@ -17,7 +16,7 @@ struct MemberSettingsView: View {
     @State private var email: String
     
     init(member: FamilyMember, familyTreeID: String, isAdmin: Binding<Bool>, canAddMembers: Binding<Bool>) {
-        self.member = member
+        self._viewModel = StateObject(wrappedValue: MemberSettingsViewModel(member: member))
         self.familyTreeID = familyTreeID
         self._isAdmin = isAdmin
         self._canAddMembers = canAddMembers
@@ -29,70 +28,63 @@ struct MemberSettingsView: View {
     
     var body: some View {
         NavigationView {
-            Form {
-                Section(header: Text("Member Details")) {
-                    TextField("First Name", text: $firstName)
-                    TextField("Last Name", text: $lastName)
-                    TextField("Email", text: $email)
-                        .keyboardType(.emailAddress)
-                }
-                
-                Section(header: Text("Member Permissions")) {
-                    Toggle("Admin Access", isOn: $isAdmin)
-                    Toggle("Can Add Members", isOn: $canAddMembers)
-                    Toggle("Can Edit Tree", isOn: .constant(member.canEdit))
-                }
-                
-                Section {
-                    Button("Remove from Family Tree", role: .destructive) {
-                        showRemoveConfirmation = true
+            ZStack {
+                Form {
+                    Section(header: Text("Member Details")) {
+                        TextField("First Name", text: $firstName)
+                        TextField("Last Name", text: $lastName)
+                        TextField("Email", text: $email)
+                            .keyboardType(.emailAddress)
+                    }
+                    
+                    Section(header: Text("Member Permissions")) {
+                        Toggle("Admin Access", isOn: $isAdmin)
+                        Toggle("Can Add Members", isOn: $canAddMembers)
+                        Toggle("Can Edit Tree", isOn: .constant(viewModel.member?.canEdit ?? false))
+                    }
+                    
+                    Section {
+                        Button("Remove from Family Tree", role: .destructive) {
+                            showRemoveConfirmation = true
+                        }
                     }
                 }
-            }
-            .navigationTitle("Member Settings")
-            .navigationBarItems(trailing: Button("Done") {
-                saveChanges()
-            })
-            .alert("Error", isPresented: $showError) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(errorMessage)
-            }
-            .confirmationDialog(
-                "Remove Member",
-                isPresented: $showRemoveConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Remove", role: .destructive) {
-                    removeMember()
+                .navigationTitle("Member Settings")
+                .navigationBarItems(trailing: Button("Done") {
+                    saveChanges()
+                })
+                .alert("Error", isPresented: $showError) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text(errorMessage)
                 }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("Are you sure you want to remove this member from the family tree?")
+                .confirmationDialog(
+                    "Remove Member",
+                    isPresented: $showRemoveConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Remove", role: .destructive) {
+                        removeMember()
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("Are you sure you want to remove this member from the family tree?")
+                }
+                
+                if viewModel.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.3))
+                }
             }
         }
     }
     
     private func saveChanges() {
-        guard let memberId = member.id else {
+        guard let memberId = viewModel.member?.id else {
             showError(message: "Invalid member ID")
             return
         }
-        
-        let memberRef = db.collection("familyTrees")
-            .document(familyTreeID)
-            .collection("familyMembers")
-            .document(memberId)
-        
-        // Create updated member data
-        let updatedData: [String: Any] = [
-            "firstName": firstName.trimmingCharacters(in: .whitespacesAndNewlines),
-            "lastName": lastName.trimmingCharacters(in: .whitespacesAndNewlines),
-            "email": email.trimmingCharacters(in: .whitespacesAndNewlines),
-            "isAdmin": isAdmin,
-            "canAddMembers": canAddMembers,
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
         
         // Validate required fields
         if firstName.isEmpty || lastName.isEmpty || email.isEmpty {
@@ -106,53 +98,62 @@ struct MemberSettingsView: View {
             return
         }
         
-        // Update the document
-        memberRef.updateData(updatedData) { error in
-            if let error = error {
-                showError(message: "Failed to save changes: \(error.localizedDescription)")
-                
-                // Revert state to original values if update fails
-                DispatchQueue.main.async {
-                    firstName = member.firstName
-                    lastName = member.lastName
-                    email = member.email
-                    isAdmin = member.isAdmin
-                    canAddMembers = member.canAddMembers
-                }
-            } else {
-                // Success - dismiss the view
-                DispatchQueue.main.async {
+        // Create updated member data
+        let updatedData: [String: Any] = [
+            "firstName": firstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "lastName": lastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "email": email.trimmingCharacters(in: .whitespacesAndNewlines),
+            "isAdmin": isAdmin,
+            "canAddMembers": canAddMembers,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        
+        Task {
+            do {
+                try await viewModel.updateMemberSettings(
+                    memberId: memberId,
+                    familyTreeId: familyTreeID,
+                    updatedData: updatedData
+                )
+                await MainActor.run {
                     dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    showError(message: "Failed to save changes: \(error.localizedDescription)")
+                    // Revert state to original values if update fails
+                    if let member = viewModel.member {
+                        firstName = member.firstName
+                        lastName = member.lastName
+                        email = member.email
+                        isAdmin = member.isAdmin
+                        canAddMembers = member.canAddMembers
+                    }
                 }
             }
         }
     }
     
     private func showError(message: String) {
-        DispatchQueue.main.async {
-            errorMessage = message
-            showError = true
-        }
+        errorMessage = message
+        showError = true
     }
     
     private func removeMember() {
-        guard let memberId = member.id else {
-            errorMessage = "Invalid member ID"
-            showError = true
+        guard let memberId = viewModel.member?.id else {
+            showError(message: "Invalid member ID")
             return
         }
         
-        FamilyTreeManager.shared.removeMember(
-            memberId: memberId,
-            from: familyTreeID
-        ) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success:
-                    self.dismiss()
-                case .failure(let error):
-                    self.errorMessage = "Failed to remove member: \(error.localizedDescription)"
-                    self.showError = true
+        Task {
+            do {
+                try await viewModel.removeMember(memberId: memberId, familyTreeId: familyTreeID)
+                await MainActor.run {
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    showError(message: "Failed to remove member: \(error.localizedDescription)")
                 }
             }
         }

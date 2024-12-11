@@ -6,6 +6,9 @@ struct VaultItemGrid: View {
     @Binding var selectedPhotos: [PhotosPickerItem]
     @Binding var isSelecting: Bool
     @Binding var selectedItems: Set<VaultItem>
+    @Binding var error: Error?
+    @Binding var showError: Bool
+    var refreshItems: () async -> Void
     
     let filteredItems: [VaultItem]
     let columns: [GridItem]
@@ -17,7 +20,10 @@ struct VaultItemGrid: View {
                     SelectableItemView(
                         item: item,
                         isSelected: selectedItems.contains(item),
-                        toggleSelection: { toggleSelection(for: item) }
+                        toggleSelection: { toggleSelection(for: item) },
+                        error: $error,
+                        showError: $showError,
+                        refreshItems: refreshItems
                     )
                 } else {
                     ItemNavigationLink(
@@ -45,25 +51,29 @@ struct VaultItemGrid: View {
 }
 
 struct SelectableItemView: View {
+    @EnvironmentObject var vaultManager: VaultManager
     let item: VaultItem
     let isSelected: Bool
     let toggleSelection: () -> Void
+    @Binding var error: Error?
+    @Binding var showError: Bool
+    var refreshItems: () async -> Void
     
     var body: some View {
-        VStack(spacing: 8) {
-            VaultItemThumbnailView(item: item)
-                .frame(height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    SelectionOverlay(isSelected: isSelected, action: toggleSelection)
-                )
-            Text(item.title)
-                .font(.caption)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ZStack {
+            ItemViewContent(item: item)
+                .allowsHitTesting(false)
+            
+            SelectionOverlay(
+                selectedItems: .constant([]),
+                isSelecting: .constant(false),
+                error: $error,
+                showError: $showError,
+                refreshItems: refreshItems,
+                isSelected: isSelected,
+                action: toggleSelection
+            )
         }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: toggleSelection)
     }
 }
 

@@ -3,7 +3,7 @@ import FirebaseFirestore
 import FirebaseAuth
 
 class CommentService {
-    private let db = Firestore.firestore()
+    private let db = FirestoreManager.shared.getDB()
     
     func addComment(to storyId: String,
                    in historyBookId: String,

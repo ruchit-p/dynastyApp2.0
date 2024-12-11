@@ -6,7 +6,7 @@ class VaultDocumentScanningFunctions {
     private static let logger = Logger(subsystem: "com.dynasty.VaultView", category: "DocumentScanning")
     
     static func saveScannedDocumentAsPDF(images: [UIImage], documentName: String, vaultManager: VaultManager) async throws {
-        guard let userId = vaultManager.currentUser?.id else {
+        guard let userId = await vaultManager.currentUser?.id else {
             throw VaultError.authenticationFailed("User not authenticated")
         }
         guard !images.isEmpty else {
@@ -17,7 +17,7 @@ class VaultDocumentScanningFunctions {
         let keyId = try await vaultManager.generateEncryptionKey(for: userId)
         
         let finalName = documentName.isEmpty ? "Untitled.pdf" : "\(documentName).pdf"
-        let metadata = VaultItemMetadata(
+        let metadata = await VaultItemMetadata(
             originalFileName: finalName,
             fileSize: Int64(pdfData.count),
             mimeType: "application/pdf",

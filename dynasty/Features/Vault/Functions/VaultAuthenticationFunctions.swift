@@ -4,7 +4,7 @@ import os.log
 class VaultAuthenticationFunctions {
     private static let logger = Logger(subsystem: "com.dynasty.VaultView", category: "Authentication")
     
-    static func handleUserChange(_ user: User?, vaultManager: VaultManager) {
+    @MainActor static func handleUserChange(_ user: User?, vaultManager: VaultManager) {
         guard let user = user, let userId = user.id else {
             vaultManager.lock()
             return
@@ -14,7 +14,7 @@ class VaultAuthenticationFunctions {
         authenticate(userId: userId, vaultManager: vaultManager)
     }
     
-    static func authenticate(userId: String, vaultManager: VaultManager) {
+    @MainActor static func authenticate(userId: String, vaultManager: VaultManager) {
         guard !vaultManager.isAuthenticating else { return }
         
         logger.info("Starting vault authentication for user: \(userId)")

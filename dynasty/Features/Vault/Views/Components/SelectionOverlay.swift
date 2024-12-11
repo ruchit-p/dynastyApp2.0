@@ -1,6 +1,15 @@
 import SwiftUI
 
 struct SelectionOverlay: View {
+    @EnvironmentObject var vaultManager: VaultManager
+    @Binding var selectedItems: Set<VaultItem>
+    @Binding var isSelecting: Bool
+    @Binding var error: Error?
+    @Binding var showError: Bool
+    @State private var shareSheetItems: [Any] = []
+    @State private var showShareSheet = false
+    var refreshItems: () async -> Void
+    
     let isSelected: Bool
     let action: () -> Void
 
@@ -24,9 +33,13 @@ struct SelectionOverlay: View {
                 .position(x: 20, y: 20)
         }
         .onTapGesture(perform: action)
+        .sheet(isPresented: $showShareSheet) {
+            ShareSheet(activityItems: shareSheetItems)
+        }
+        .errorOverlay(error: error, isPresented: $showError)
     }
-
-        private func downloadSelectedItems() async {
+    
+    private func downloadSelectedItems() async {
         do {
             var tempFiles: [URL] = []
             for item in selectedItems {
@@ -49,7 +62,7 @@ struct SelectionOverlay: View {
         }
     }
 
-       private func shareSelectedItems() async {
+    private func shareSelectedItems() async {
         do {
             var tempFiles: [URL] = []
             for item in selectedItems {
@@ -72,7 +85,7 @@ struct SelectionOverlay: View {
         }
     }
 
-       private func deleteSelectedItems() async {
+    private func deleteSelectedItems() async {
         do {
             for item in selectedItems {
                     try await vaultManager.moveToTrash(item)

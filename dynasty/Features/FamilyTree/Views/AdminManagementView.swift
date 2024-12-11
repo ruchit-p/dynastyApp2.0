@@ -3,134 +3,113 @@ import FirebaseFirestore
 
 struct AdminManagementView: View {
     let familyTreeID: String
-    @State private var familyMembers: [FamilyMember] = []
+    @StateObject private var viewModel = AdminManagementViewModel()
     @State private var showingMemberSettings = false
     @State private var selectedMember: FamilyMember?
-    @State private var selectedMemberIsAdmin: Bool = false
-    @State private var selectedMemberCanAddMembers: Bool = false
     @Environment(\.dismiss) private var dismiss
-    let db = Firestore.firestore()
     @State private var showError = false
     @State private var errorMessage = ""
-    @State private var listeners: [ListenerRegistration] = []
     
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Family Admin Center")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .padding()
-                
-                List {
-                    ForEach(familyMembers) { member in
-                        HStack {
-                            Text("\(member.firstName) \(member.lastName)")
-                                .font(.title3)
-                            
-                            Spacer()
-                            
-                            // Admin/Owner status icon
-                            if member.isAdmin {
-                                Image(systemName: "person.fill.checkmark")
-                                    .foregroundColor(.blue)
-                            } else {
-                                Image(systemName: "person")
-                                    .foregroundColor(.gray)
-                            }
-                            
-                            // Add permissions button
-                            if member.canAddMembers {
-                                Button(action: {
-                                    toggleAddPermission(for: member)
-                                }) {
-                                    Image(systemName: "person.badge.plus.fill")
-                                        .foregroundColor(.green)
+            ZStack {
+                VStack {
+                    Text("Family Admin Center")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .padding()
+                    
+                    List {
+                        ForEach(viewModel.admins) { member in
+                            HStack {
+                                Text("\(member.firstName) \(member.lastName)")
+                                    .font(.title3)
+                                
+                                Spacer()
+                                
+                                if member.isAdmin {
+                                    Image(systemName: "person.fill.checkmark")
+                                        .foregroundColor(.blue)
+                                } else {
+                                    Image(systemName: "person")
+                                        .foregroundColor(.gray)
                                 }
-                            } else {
+                                
+                                if member.canAddMembers {
+                                    Button(action: {
+                                        toggleAddPermission(for: member)
+                                    }) {
+                                        Image(systemName: "person.badge.plus.fill")
+                                            .foregroundColor(.green)
+                                    }
+                                } else {
+                                    Button(action: {
+                                        toggleAddPermission(for: member)
+                                    }) {
+                                        Image(systemName: "person.badge.plus")
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                                
                                 Button(action: {
-                                    toggleAddPermission(for: member)
+                                    selectedMember = member
+                                    showingMemberSettings = true
                                 }) {
-                                    Image(systemName: "person.badge.plus")
+                                    Image(systemName: "ellipsis")
                                         .foregroundColor(.gray)
                                 }
                             }
-                            
-                            // Settings button
-                            Button(action: {
-                                selectedMember = member
-                                showingMemberSettings = true
-                            }) {
-                                Image(systemName: "ellipsis")
-                                    .foregroundColor(.gray)
-                            }
+                            .padding(.vertical, 8)
                         }
-                        .padding(.vertical, 8)
                     }
+                }
+                
+                if viewModel.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.3))
+                }
+                
+                if let error = viewModel.error {
+                    Text(error.localizedDescription)
+                        .foregroundColor(.red)
+                        .padding()
                 }
             }
             .navigationBarItems(leading: Button("Back") {
                 dismiss()
             })
             .onAppear {
-                setupMembersListener()
-            }
-            .onDisappear {
-                listeners.forEach { $0.remove() }
-                listeners.removeAll()
+                Task {
+                    await viewModel.fetchAdmins(familyTreeId: familyTreeID)
+                }
             }
             .sheet(isPresented: $showingMemberSettings) {
-                if let index = familyMembers.firstIndex(where: { $0.id == selectedMember?.id }) {
+                if let member = selectedMember {
                     MemberSettingsView(
-                        member: familyMembers[index],
+                        member: member,
                         familyTreeID: familyTreeID,
                         isAdmin: Binding(
-                            get: { self.familyMembers[index].isAdmin },
+                            get: { member.isAdmin },
                             set: { newValue in
-                                self.familyMembers[index].isAdmin = newValue
-                                self.toggleAdminStatus(for: self.familyMembers[index], newStatus: newValue)
+                                toggleAdminStatus(for: member, newStatus: newValue)
                             }
                         ),
                         canAddMembers: Binding(
-                            get: { self.familyMembers[index].canAddMembers },
+                            get: { member.canAddMembers },
                             set: { newValue in
-                                self.familyMembers[index].canAddMembers = newValue
-                                self.toggleAddPermission(for: self.familyMembers[index])
+                                toggleAddPermission(for: member)
                             }
                         )
                     )
                 }
             }
-        }
-        .alert("Error", isPresented: $showError) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(errorMessage)
-        }
-    }
-    
-    private func setupMembersListener() {
-        let listener = db.collection("familyTrees")
-            .document(familyTreeID)
-            .collection("familyMembers")
-            .addSnapshotListener { snapshot, error in
-                if let error = error {
-                    print("Error fetching family members: \(error.localizedDescription)")
-                    return
-                }
-                
-                if let documents = snapshot?.documents {
-                    let members = documents.compactMap { document in
-                        var member = try? document.data(as: FamilyMember.self)
-                        member?.id = document.documentID // Ensure ID is set
-                        return member
-                    }
-                    DispatchQueue.main.async {
-                        self.familyMembers = members
-                    }
-                }
+            .alert("Error", isPresented: $showError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(errorMessage)
             }
-        listeners.append(listener)
+        }
     }
     
     private func toggleAddPermission(for member: FamilyMember) {
@@ -139,18 +118,18 @@ struct AdminManagementView: View {
             return 
         }
         
-        let memberRef = db.collection("familyTrees")
-            .document(familyTreeID)
-            .collection("familyMembers")
-            .document(memberId)
-        
-        memberRef.updateData([
-            "canAddMembers": !member.canAddMembers
-        ]) { error in
-            if let error = error {
-                showError(message: "Failed to update permissions: \(error.localizedDescription)")
+        Task {
+            do {
+                try await viewModel.updateAdminStatus(
+                    memberId: memberId,
+                    familyTreeId: familyTreeID,
+                    isAdmin: member.isAdmin
+                )
+            } catch {
+                await MainActor.run {
+                    showError(message: "Failed to update permissions: \(error.localizedDescription)")
+                }
             }
-            // Do not manually fetch family members; rely on snapshot listener
         }
     }
     
@@ -160,30 +139,23 @@ struct AdminManagementView: View {
             return 
         }
         
-        let memberRef = db.collection("familyTrees")
-            .document(familyTreeID)
-            .collection("familyMembers")
-            .document(memberId)
-        
-        memberRef.updateData([
-            "isAdmin": newStatus
-        ]) { error in
-            if let error = error {
-                showError(message: "Failed to update admin status: \(error.localizedDescription)")
-                // Revert the local state if the server update fails
-                DispatchQueue.main.async {
-                    if let index = familyMembers.firstIndex(where: { $0.id == member.id }) {
-                        familyMembers[index].isAdmin = !newStatus
-                    }
+        Task {
+            do {
+                try await viewModel.updateAdminStatus(
+                    memberId: memberId,
+                    familyTreeId: familyTreeID,
+                    isAdmin: newStatus
+                )
+            } catch {
+                await MainActor.run {
+                    showError(message: "Failed to update admin status: \(error.localizedDescription)")
                 }
             }
         }
     }
     
     private func showError(message: String) {
-        DispatchQueue.main.async {
-            errorMessage = message
-            showError = true
-        }
+        errorMessage = message
+        showError = true
     }
 }

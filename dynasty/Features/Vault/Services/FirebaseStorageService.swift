@@ -1,10 +1,12 @@
 import Foundation
 import FirebaseStorage
+import FirebaseFirestore
 import os.log
 
 class FirebaseStorageService {
     static let shared = FirebaseStorageService()
     private let storage = Storage.storage()
+    private let db = FirestoreManager.shared.getDB()
     private let logger = Logger(subsystem: "com.dynasty.FirebaseStorageService", category: "Storage")
     
     private init() {}

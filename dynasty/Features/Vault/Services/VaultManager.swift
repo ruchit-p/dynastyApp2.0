@@ -208,7 +208,7 @@ class VaultManager: ObservableObject {
     func loadItems(for userId: String) async throws {
         logger.info("Loading vault items for user: \(userId)")
         do {
-            self.items = try await dbManager.fetchItems(for: userId)
+            self.items = try await dbManager.fetchItems(for: userId, sortOption: .name ,isAscending: true )
             logger.info("Successfully loaded \(self.items.count) items for user: \(userId)")
         } catch {
             logger.error("Failed to load items: \(error.localizedDescription)")
@@ -629,12 +629,12 @@ func permanentlyDeleteItem(_ item: VaultItem) async throws {
     
 
     // Optionally, clear cache when receiving memory warnings
-    NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(clearMemoryCaches),
-        name: UIApplication.didReceiveMemoryWarningNotification,
-        object: nil
-    )
+//    NotificationCenter;.default.addObserver(
+//        self,
+//        selector: #selector(clearMemoryCaches),
+//        name: UIApplication.didReceiveMemoryWarningNotification,
+//        object: nil
+//    )
 
     @objc private func clearMemoryCaches() {
         thumbnailCache.removeAllObjects()

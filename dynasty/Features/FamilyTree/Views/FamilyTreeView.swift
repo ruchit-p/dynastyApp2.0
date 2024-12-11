@@ -8,6 +8,7 @@ struct FamilyTreeView: View {
     @State private var showingAddMemberSheet = false
     @State private var showingMemberDetails = false
     @State private var selectedMember: FamilyTreeNode?
+    @State private var showError = false
     
     init(treeId: String, userId: String) {
         _viewModel = StateObject(wrappedValue: FamilyTreeViewModel(treeId: treeId, userId: userId))
@@ -45,11 +46,6 @@ struct FamilyTreeView: View {
                     // Loading Indicator
                     if viewModel.isLoading {
                         ProgressView()
-                    }
-                    
-                    // Error View
-                    if let error = viewModel.error {
-                        ErrorView(error: error)
                     }
                 }
             }
@@ -102,6 +98,22 @@ struct FamilyTreeView: View {
         .sheet(item: $selectedMember) { member in
             MemberDetailsView(member: member, viewModel: viewModel)
         }
+        .errorOverlay(error: viewModel.error, isPresented: $showError) {
+            Task {
+                do {
+                    try await viewModel.loadTreeData()
+                } catch {
+                    print("Error reloading tree data: \(error.localizedDescription)")
+                    // Update the viewModel error to show the new error message
+                    await MainActor.run {
+                        viewModel.error = error
+                    }
+                }
+            }
+        }
+        .onChange(of: viewModel.error?.localizedDescription ?? "") { oldValue, newValue in
+            showError = !newValue.isEmpty
+        }
     }
 }
 
@@ -114,28 +126,6 @@ struct FamilyTreeCanvas: View {
         // This is a placeholder for the actual tree rendering
         // We'll implement the tree layout algorithm in the next step
         Text("Tree Canvas - Coming Soon")
-    }
-}
-
-struct ErrorView: View {
-    let error: Error
-    
-    var body: some View {
-        VStack {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
-                .foregroundColor(.red)
-            Text("Error")
-                .font(.headline)
-            Text(error.localizedDescription)
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .padding()
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(15)
-        .shadow(radius: 5)
     }
 }
 

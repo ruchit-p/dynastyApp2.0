@@ -4,7 +4,7 @@ import FirebaseFirestore
 
 struct ProfileView: View {
     @Binding var showingSignUp: Bool
-    @State private var userData: User?
+    @StateObject private var viewModel = ProfileViewModel()
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authManager: AuthManager
     
@@ -19,28 +19,33 @@ struct ProfileView: View {
                     Spacer()
                     
                     // Avatar with edit option
-                    NavigationLink(destination: UserProfileEditView(currentUser: userData ?? .init(id: "", displayName: "", email: "", dateOfBirth: Date(), firstName: "", lastName: "", phoneNumber: "", familyTreeID: "", historyBookID: "", parentIds: [], childrenIds: [], isAdmin: false, canAddMembers: false, canEdit: false, photoURL: "", createdAt: Timestamp(), updatedAt: nil))) {
-                        if let photoURL = userData?.photoURL, let url = URL(string: photoURL) {
-                            AsyncImage(url: url) { image in
-                                image.resizable()
-                            } placeholder: {
-                                ProgressView()
-                            }
-                            .frame(width: 60, height: 60)
-                            .clipShape(Circle())
-                        } else {
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
+                    if let user = viewModel.user {
+                        NavigationLink(destination: UserProfileEditView(currentUser: user)) {
+                            if let photoURL = user.photoURL, let url = URL(string: photoURL) {
+                                AsyncImage(url: url) { image in
+                                    image.resizable()
+                                } placeholder: {
+                                    ProgressView()
+                                }
                                 .frame(width: 60, height: 60)
+                                .clipShape(Circle())
+                            } else {
+                                Image(systemName: "person.circle.fill")
+                                    .resizable()
+                                    .frame(width: 60, height: 60)
+                            }
                         }
                     }
                 }
                 .padding(.horizontal)
                 .padding(.top, 20)
                 
-                if let userData = userData {
-                    Text("Hey, \(userData.displayName)!")
+                if let user = viewModel.user {
+                    Text("Hey, \(user.displayName)!")
                         .font(.title2)
+                        .padding(.top, 10)
+                } else if viewModel.isLoading {
+                    ProgressView()
                         .padding(.top, 10)
                 } else {
                     Text("Loading profile...")
@@ -48,21 +53,25 @@ struct ProfileView: View {
                         .padding(.top, 10)
                 }
                 
+                if let error = viewModel.error {
+                    Text("Error: \(error.localizedDescription)")
+                        .foregroundColor(.red)
+                        .padding()
+                }
+                
                 Spacer()
                 
                 // Profile options
                 VStack(spacing: 20) {
-                    // Category buttons
-                    NavigationLink(destination: UserProfileEditView(currentUser: userData ?? .init(id: "", displayName: "", email: "", dateOfBirth: Date(), firstName: "", lastName: "", phoneNumber: "", familyTreeID: "", historyBookID: "", parentIds: [], childrenIds: [], isAdmin: false, canAddMembers: false, canEdit: false, photoURL: "", createdAt: Timestamp(), updatedAt: nil))) {
-                        ProfileCategoryRow(title: "Personal Information", systemImage: "person")
+                    if let user = viewModel.user {
+                        NavigationLink(destination: UserProfileEditView(currentUser: user)) {
+                            ProfileCategoryRow(title: "Personal Information", systemImage: "person")
+                        }
                     }
                     
-                    // ... other buttons ...
+                    // ... existing buttons ...
                     
-                    Button(action: {
-                        // Log Out action
-                        signOut()
-                    }) {
+                    Button(action: signOut) {
                         Text("Log Out")
                             .frame(maxWidth: .infinity)
                             .padding()
@@ -76,7 +85,11 @@ struct ProfileView: View {
             }
             .navigationBarHidden(true)
             .onAppear {
-                fetchUserData()
+                if let userId = Auth.auth().currentUser?.uid {
+                    Task {
+                        await viewModel.fetchUserProfile(userId: userId)
+                    }
+                }
             }
         }
     }
@@ -90,34 +103,13 @@ struct ProfileView: View {
             print("Error signing out: \(error.localizedDescription)")
         }
     }
-    
-    private func fetchUserData() {
-        guard let currentUser = Auth.auth().currentUser else { return }
-
-        let db = Firestore.firestore()
-        let docRef = db.collection("users").document(currentUser.uid)
-        docRef.getDocument { document, error in
-            if let document = document, document.exists {
-                do {
-                    let user = try document.data(as: User.self)
-                    DispatchQueue.main.async {
-                        self.userData = user
-                    }
-                } catch {
-                    print("Error decoding user data: \(error.localizedDescription)")
-                }
-            } else {
-                print("User document does not exist.")
-            }
-        }
-    }
 }
 
 // Helper view for category rows
 struct ProfileCategoryRow: View {
     var title: String
     var systemImage: String
-
+    
     var body: some View {
         HStack {
             Image(systemName: systemImage)
