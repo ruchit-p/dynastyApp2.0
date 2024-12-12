@@ -434,56 +434,96 @@ func downloadFile(_ item: VaultItem) async throws -> Data {
     }
     
     // Check cache first
-    if let cachedData = fileDataCache[item.id] {
-        logger.info("Using cached data for file: \(item.id)")
+    if let cachedData = self.fileDataCache[item.id] {
+        self.logger.info("Using cached data for file: \(item.id)")
         return cachedData
     }
     
-    logger.info("Downloading file: \(item.id)")
+    self.logger.info("Downloading file: \(item.id)")
     do {
-        logger.info("Starting download for file: \(item.id) from path: \(item.storagePath)")
+        self.logger.info("Starting download for file: \(item.id) from path: \(item.storagePath)")
        
-        let downloadResult = try await storageService.downloadEncryptedData(from: item.storagePath) { progress in
+        // Update the call to `downloadEncryptedData` to match its new definition
+        try await self.storageService.downloadEncryptedData(from: item.storagePath) { progress in
             Task { @MainActor in
                 self.processingProgress = progress
-                logger.debug("Download progress for \(item.id): \(progress)%")
+                self.logger.debug("Download progress for \(item.id): \(progress)%")
+            }
+        } completion: { result in
+            Task { @MainActor in
+                switch result {
+                case .success(let data):
+                    self.processingProgress = 1.0
+                    self.logger.debug("Download progress for \(item.id): \\(self.processingProgress)%")
+                  
+                    self.logger.info("Download completed for file: \(item.id), size: \(data.count) bytes")
+
+                    do {
+                        self.logger.info("Starting decryption for file: \(item.id)")
+                        let decryptedData = try self.encryptionService.decryptFile(
+                            encryptedData: data,
+                            userId: item.userId,
+                            keyId: item.metadata.encryptionKeyId
+                        )
+                        self.logger.info("Decryption completed for file: \(item.id)")
+                            
+                        self.logger.info("Verifying file integrity for: \(item.id)")
+                        let fileHash = self.encryptionService.generateFileHash(for: decryptedData)
+                        guard fileHash == item.metadata.hash else {
+                                self.logger.error("File integrity check failed for: \(item.id)")
+                              throw VaultError.fileOperationFailed("File integrity check failed")
+                          }
+                        self.logger.info("File integrity verified for: \(item.id)")
+                        
+                        // Cache the decrypted data
+                        self.fileDataCache[item.id] = decryptedData
+                         self.logger.info("Successfully cached decrypted data for: \(item.id)")
+                    } catch {
+                        self.logger.error("Failed to process file \(item.id): \(error.localizedDescription)")
+                        self.processingProgress = 0
+                    }
+
+                case .failure(let error):
+                    self.logger.error("Download failed for file \(item.id): \(error.localizedDescription)")
+                    self.processingProgress = 0
+                }
             }
         }
-         switch downloadResult {
-        case .success(let data):
-            self.processingProgress = 1.0
-            logger.debug("Download progress for \(item.id): \\(self.processingProgress)%")
-          
-            logger.info("Download completed for file: \(item.id), size: \(data.count) bytes")
-
-           logger.info("Starting decryption for file: \(item.id)")
-           let decryptedData = try encryptionService.decryptFile(
-                 encryptedData: data,
-                    userId: item.userId,
-                   keyId: item.metadata.encryptionKeyId
-            )
-            logger.info("Decryption completed for file: \(item.id)")
+        
+        // Since `downloadEncryptedData` now handles its own completion, we need to refactor this part
+        // We will use a Task to await the processing to complete
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let checkCompletionTask = Task {
+                repeat {
+                    // Check every 0.1 seconds
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                } while self.processingProgress < 1.0 && self.processingProgress > 0
                 
-            logger.info("Verifying file integrity for: \(item.id)")
-            let fileHash = encryptionService.generateFileHash(for: decryptedData)
-            guard fileHash == item.metadata.hash else {
-                    logger.error("File integrity check failed for: \(item.id)")
-                  throw VaultError.fileOperationFailed("File integrity check failed")
-              }
-            logger.info("File integrity verified for: \(item.id)")
+                if self.processingProgress >= 1.0 {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: VaultError.fileOperationFailed("Download did not complete successfully."))
+                }
+            }
             
-            // Cache the decrypted data
-            fileDataCache[item.id] = decryptedData
-             logger.info("Successfully cached decrypted data for: \(item.id)")
+            // If the download fails or the task is cancelled, ensure we stop checking for completion
+            Task {
+                do {
+                    try await checkCompletionTask.value
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+        
+        // After download and decryption, return the decrypted data
+        if let decryptedData = self.fileDataCache[item.id] {
             return decryptedData
-
-          case .failure(let error):
-           logger.error("Download failed for file \(item.id): \(error.localizedDescription)")
-                self.processingProgress = 0
-           throw error
-         }
+        } else {
+            throw VaultError.fileOperationFailed("Failed to retrieve decrypted data.")
+        }
     } catch {
-        logger.error("Failed to process file \(item.id): \(error.localizedDescription)")
+        self.logger.error("Failed to process file \(item.id): \(error.localizedDescription)")
         self.processingProgress = 0
         throw error
     }
