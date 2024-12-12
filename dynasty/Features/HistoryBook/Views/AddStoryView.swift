@@ -2,6 +2,7 @@ import SwiftUI
 import FirebaseFirestore
 import FirebaseAuth
 import FirebaseStorage
+import PhotosUI
 
 struct AppError: Identifiable {
     let id = UUID()
@@ -17,76 +18,39 @@ struct AddStoryView: View {
     @State private var selectedDate = Date()
     @State private var selectedImages: [UIImage] = []
     @State private var showImagePicker = false
+    @State private var selectedItems: [PhotosPickerItem] = []
+    @State private var contentElements: [ContentElement] = [
+        ContentElement(id: UUID().uuidString, type: .text, value: "") // Start with an empty text element
+    ]
     
     var historyBookID: String
     var familyTreeID: String
     
     var body: some View {
         NavigationView {
-            VStack {
-                // Cover Image Selection
-                Button(action: {
-                    showImagePicker = true
-                }) {
-                    if let image = selectedImages.first {
-                        Image(uiImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(height: 200)
-                            .clipped()
-                    } else {
-                        ZStack {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 200)
-                            Text("Tap to select a cover image")
-                                .foregroundColor(.gray)
+            Form {
+                Section {
+                    TextField("Title", text: $title)
+                    
+                    // Display selected media (you might want a more sophisticated preview)
+                    ForEach(contentElements.filter { $0.type != .text }) { element in
+                        ContentElementView(element: element)
+                    }
+                }
+                
+                Section {
+                    Picker("Privacy", selection: $privacy) {
+                        ForEach(Story.PrivacyLevel.allCases, id: \.self) { level in
+                            Text(level.rawValue).tag(level)
                         }
                     }
                 }
-                .sheet(isPresented: $showImagePicker) {
-                    ImagePicker(selectedImage: Binding(
-                        get: { selectedImages.first },
-                        set: { if let image = $0 { selectedImages = [image] } }
-                    ))
+                
+                // Text Input
+                Section(header: Text("Story Content")) {
+                    RichTextEditorView(contentElements: $contentElements)
+                        .frame(minHeight: 200)
                 }
-                
-                // Title
-                TextField("Title", text: $title)
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .cornerRadius(8)
-                    .padding(.horizontal)
-                
-                // Content (Markdown Editor)
-                MarkdownTextView(text: $content, placeholder: "Write your story here...")
-                    .frame(height: 200)
-                    .padding(.horizontal)
-                
-                // Privacy Picker
-                Picker("Privacy", selection: $privacy) {
-                    Text("Public").tag(Story.PrivacyLevel.familyPublic)
-                    Text("Private").tag(Story.PrivacyLevel.privateAccess)
-                }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding()
-                
-                if viewModel.isLoading {
-                    VStack {
-                        ProgressView("Uploading...")
-                        Text("\(Int(viewModel.uploadProgress * 100))%")
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.3))
-                }
-                
-                if let error = viewModel.error {
-                    Text(error.localizedDescription)
-                        .foregroundColor(.red)
-                        .padding()
-                }
-                
-                Spacer()
             }
             .navigationBarTitle("Add Story", displayMode: .inline)
             .navigationBarItems(
@@ -104,12 +68,14 @@ struct AddStoryView: View {
     private func addStory() {
         guard let currentUser = Auth.auth().currentUser else { return }
         
+        // Convert contentElements to JSON string
+        let contentJSON = convertContentElementsToJSON(contentElements)
+
         Task {
             do {
                 try await viewModel.createStory(
                     title: title,
-                    content: content,
-                    images: selectedImages,
+                    content: contentJSON, // Pass the JSON string here
                     privacy: privacy.rawValue,
                     familyTreeId: familyTreeID,
                     creatorUserId: currentUser.uid
@@ -121,6 +87,22 @@ struct AddStoryView: View {
                 // Error is handled by ViewModel
                 print("Failed to create story: \(error.localizedDescription)")
             }
+        }
+    }
+
+    // Helper function to convert contentElements to JSON
+    private func convertContentElementsToJSON(_ elements: [ContentElement]) -> String {
+        let content = ["elements": elements]
+        do {
+            let jsonData = try JSONEncoder().encode(content)
+            if let jsonString = String(data: jsonData, encoding: .utf8) {
+                return jsonString
+            } else {
+                return ""
+            }
+        } catch {
+            print("Error converting content elements to JSON: \(error)")
+            return ""
         }
     }
 } 

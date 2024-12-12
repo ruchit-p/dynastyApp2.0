@@ -33,11 +33,33 @@ struct Story: Identifiable, Codable {
     @ServerTimestamp var createdAt: Date?
     @ServerTimestamp var updatedAt: Date?
     
-    enum PrivacyLevel: String, Codable {
-        case inherited = "inherited" // Uses history book's privacy
-        case familyPublic = "familyPublic" // Visible to all family members
-        case privateAccess = "private"    // Only visible to creator
-        
-        static var `default`: PrivacyLevel { .inherited }
+    enum PrivacyLevel: String, Codable, CaseIterable {
+        case familyPublic = "familyPublic"
+        case familyPrivate = "familyPrivate"
+    }
+}
+
+// Represents a single element within the story content
+struct ContentElement: Identifiable, Codable {
+    var id: String
+    var type: ContentType
+    var value: String
+    var format: TextFormat?
+
+    enum ContentType: String, Codable {
+        case text, image, video, audio
+    }
+
+    struct TextFormat: Codable {
+        var isBold: Bool = false
+        var isItalic: Bool = false
+        var isUnderlined: Bool = false
+        var highlightColor: String?
+        var textColor: String?
+        var alignment: TextAlignment = .leading
+    }
+
+    enum TextAlignment: String, Codable {
+        case leading, center, trailing
     }
 } 

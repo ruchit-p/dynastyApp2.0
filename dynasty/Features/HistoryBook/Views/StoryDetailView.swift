@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseFirestore
 import FirebaseAuth
+import AVKit
 
 struct StoryDetailView: View {
     @StateObject private var viewModel: StoryDetailViewModel
@@ -47,8 +48,7 @@ struct StoryDetailView: View {
                         .fontWeight(.bold)
                         .padding(.horizontal)
                     
-                    // Rendered Markdown Content
-                    Text(tryAttributedString(from: story.content))
+                    StoryContentView(content: story.content)
                         .padding(.horizontal)
                     
                     // Like and Share buttons
@@ -106,15 +106,6 @@ struct StoryDetailView: View {
                 // Error is handled by ViewModel
                 print("Error toggling like: \(error.localizedDescription)")
             }
-        }
-    }
-    
-    private func tryAttributedString(from markdown: String) -> AttributedString {
-        do {
-            return try AttributedString(markdown: markdown)
-        } catch {
-            print("Error parsing Markdown: \(error.localizedDescription)")
-            return AttributedString(markdown)
         }
     }
 }
