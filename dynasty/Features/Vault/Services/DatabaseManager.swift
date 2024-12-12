@@ -14,7 +14,7 @@ class FirestoreDatabaseManager {
         logger.info("Firestore database context prepared for user: \(userId)")
     }
     
- func fetchItems(for userId: String, sortOption: SortOption, isAscending: Bool) async throws -> [VaultItem] {
+    func fetchItems(for userId: String, sortOption: VaultSortOption, isAscending: Bool) async throws -> [VaultItem] {
         logger.info("Fetching vault items for user: \(userId) with sorting")
         let collectionRef = db.collection("users").document(userId).collection("vaultItems")
         

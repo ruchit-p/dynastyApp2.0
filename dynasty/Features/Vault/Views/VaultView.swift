@@ -23,7 +23,7 @@ struct VaultView: View {
     @State private var showCameraPicker = false
     @State private var newFolderName = ""
     @State private var navigationPath = NavigationPath()
-    @State private var sortOption: SortOption = .date
+    @State private var sortOption: VaultSortOption = .date
     @State private var isAscending = false
     
     private let logger = Logger(subsystem: "com.dynasty.VaultView", category: "UI")
@@ -82,6 +82,7 @@ struct VaultView: View {
                                     self.error = error
                                     showError = true
                                 }
+
                             }
                         },
                         filteredItems: filteredItems,

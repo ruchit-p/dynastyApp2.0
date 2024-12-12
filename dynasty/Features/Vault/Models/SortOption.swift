@@ -1,6 +1,6 @@
 import Foundation
 
-enum SortOption: String, CaseIterable, Identifiable {
+enum VaultSortOption: String, CaseIterable, Identifiable {
     case name
     case kind
     case date

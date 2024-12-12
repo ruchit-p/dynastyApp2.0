@@ -15,7 +15,7 @@ class FirebaseStorageService {
     
     private init() {}
 
-    func fetchItems(for userId: String, sortOption: SortOption, isAscending: Bool) async throws -> [VaultItem] {
+    func fetchItems(for userId: String, sortOption: VaultSortOption, isAscending: Bool) async throws -> [VaultItem] {
         logger.info("Fetching vault items for user: \(userId) with sorting")
 
         let collectionRef = db.collection("users").document(userId).collection("vaultItems")
@@ -81,10 +81,16 @@ class FirebaseStorageService {
         }
 
         // Observe progress
-        uploadTask.observe(.progress) { snapshot in
+        uploadTask.observe(.progress) { [weak self] snapshot in
+            guard let self = self else { return }
+            
             if let progress = snapshot.progress {
                 let percentComplete = 100.0 * Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
-                progressHandler?(percentComplete) // Call the progress handler, if provided
+                
+                // Call progressHandler on the main thread with the progress percentage
+                DispatchQueue.main.async {
+                    progressHandler?(percentComplete)
+                }
             }
         }
 

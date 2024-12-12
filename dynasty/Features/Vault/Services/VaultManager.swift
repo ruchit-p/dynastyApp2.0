@@ -232,7 +232,7 @@ class VaultManager: ObservableObject {
     func loadItems(for userId: String) async throws {
         logger.info("Loading vault items for user: \(userId)")
         do {
-            self.items = try await dbManager.fetchItems(for: userId, sortOption: .name ,isAscending: true )
+            self.items = try await dbManager.fetchItems(for: userId, sortOption: VaultSortOption.name, isAscending: true)
             logger.info("Successfully loaded \(self.items.count) items for user: \(userId)")
         } catch {
             logger.error("Failed to load items: \(error.localizedDescription)")
@@ -269,7 +269,7 @@ class VaultManager: ObservableObject {
     private let cacheQueue = DispatchQueue(label: "com.dynasty.VaultManager.cacheQueue")
 
 
-func loadItems(for userId: String, sortOption: SortOption, isAscending: Bool) async throws {
+func loadItems(for userId: String, sortOption: VaultSortOption, isAscending: Bool) async throws {
         logger.info("Loading vault items for user: \(userId) with sorting")
         
         let cacheKey = "\(userId)-\(sortOption.rawValue)-\(isAscending)"
@@ -428,46 +428,66 @@ func permanentlyDeleteItem(_ item: VaultItem) async throws {
         return encryptionService.generateFileHash(for: data)
     }
     
-    func downloadFile(_ item: VaultItem) async throws -> Data {
-        guard !isLocked else {
-            throw VaultError.vaultLocked
-        }
-        
-        // Check cache first
-        if let cachedData = fileDataCache[item.id] {
-            logger.info("Using cached data for file: \(item.id)")
-            return cachedData
-        }
-        
-        logger.info("Downloading file: \(item.id)")
-        do {
-            let encryptedData = try await storageService.downloadEncryptedData(from: item.storagePath) { progress in
-                Task { @MainActor in
-                    self.processingProgress = progress
-                }
+func downloadFile(_ item: VaultItem) async throws -> Data {
+    guard !isLocked else {
+        throw VaultError.vaultLocked
+    }
+    
+    // Check cache first
+    if let cachedData = fileDataCache[item.id] {
+        logger.info("Using cached data for file: \(item.id)")
+        return cachedData
+    }
+    
+    logger.info("Downloading file: \(item.id)")
+    do {
+        logger.info("Starting download for file: \(item.id) from path: \(item.storagePath)")
+       
+        let downloadResult = try await storageService.downloadEncryptedData(from: item.storagePath) { progress in
+            Task { @MainActor in
+                self.processingProgress = progress
+                logger.debug("Download progress for \(item.id): \(progress)%")
             }
-            
-            let decryptedData = try encryptionService.decryptFile(
-                encryptedData: encryptedData,
-                userId: item.userId,
-                keyId: item.metadata.encryptionKeyId
+        }
+         switch downloadResult {
+        case .success(let data):
+            self.processingProgress = 1.0
+            logger.debug("Download progress for \(item.id): \\(self.processingProgress)%")
+          
+            logger.info("Download completed for file: \(item.id), size: \(data.count) bytes")
+
+           logger.info("Starting decryption for file: \(item.id)")
+           let decryptedData = try encryptionService.decryptFile(
+                 encryptedData: data,
+                    userId: item.userId,
+                   keyId: item.metadata.encryptionKeyId
             )
-            
+            logger.info("Decryption completed for file: \(item.id)")
+                
+            logger.info("Verifying file integrity for: \(item.id)")
             let fileHash = encryptionService.generateFileHash(for: decryptedData)
             guard fileHash == item.metadata.hash else {
-                throw VaultError.fileOperationFailed("File integrity check failed")
-            }
+                    logger.error("File integrity check failed for: \(item.id)")
+                  throw VaultError.fileOperationFailed("File integrity check failed")
+              }
+            logger.info("File integrity verified for: \(item.id)")
             
             // Cache the decrypted data
             fileDataCache[item.id] = decryptedData
-            
-            logger.info("Successfully downloaded and decrypted file: \(item.id)")
+             logger.info("Successfully cached decrypted data for: \(item.id)")
             return decryptedData
-        } catch {
-            logger.error("Failed to download file: \(error.localizedDescription)")
-            throw error
-        }
+
+          case .failure(let error):
+           logger.error("Download failed for file \(item.id): \(error.localizedDescription)")
+                self.processingProgress = 0
+           throw error
+         }
+    } catch {
+        logger.error("Failed to process file \(item.id): \(error.localizedDescription)")
+        self.processingProgress = 0
+        throw error
     }
+}
     
     func importData(
         _ data: Data,
@@ -502,32 +522,26 @@ func permanentlyDeleteItem(_ item: VaultItem) async throws {
         
         // Encrypt the data
         let encryptedData = try encryptionService.encryptFile(
-            data: data, // Corrected argument label
+            data: data,
             userId: userId,
             keyId: metadata.encryptionKeyId
         )
-
-        // Create StorageMetadata
-        let storageMetadata = StorageMetadata()
-        storageMetadata.contentType = metadata.mimeType
-        storageMetadata.customMetadata = [
-            "originalFileName": metadata.originalFileName,
-            "fileSize": String(metadata.fileSize),
-            "encryptionKeyId": metadata.encryptionKeyId,
-            "hash": metadata.hash
-        ]
-
-        // Upload the encrypted data with progress handling
-        try await withCheckedThrowingContinuation { continuation in
-            FirebaseStorageService.shared.uploadEncryptedData(
-                encryptedData,
-                fileName: newItem.encryptedFileName, // Use the encryptedFileName from newItem
-                userId: userId,
-                progressHandler: { progress in
-                    // Update your UI with the upload progress
-                    print("Upload progress for \(filename): \(progress)%")
+        
+        // Upload the encrypted data
+        try await storageService.uploadEncryptedData(
+            encryptedData,
+            fileName: newItem.encryptedFileName,
+            userId: userId,
+            progressHandler: { progress in
+                // Handle progress updates on the main thread
+                DispatchQueue.main.async {
+                    // Update UI or perform other actions with the progress value
+                    print("Upload progress: \(progress)%")
                 }
-            ) { result in
+            }
+        ) { result in
+            // Handle upload completion on the main thread
+            DispatchQueue.main.async {
                 switch result {
                 case .success(let storagePath):
                     // Update the VaultItem with the storage path
@@ -542,14 +556,12 @@ func permanentlyDeleteItem(_ item: VaultItem) async throws {
                             // Clear items cache and refresh items
                             await self.clearItemsCache()
                             try await self.refreshItems()
-                            
-                            continuation.resume()
                         } catch {
-                            continuation.resume(throwing: error)
+                            self.logger.error("Failed to save item after upload: \(error.localizedDescription)")
                         }
                     }
                 case .failure(let error):
-                    continuation.resume(throwing: error)
+                    self.logger.error("Failed to upload encrypted data: \(error.localizedDescription)")
                 }
             }
         }

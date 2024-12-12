@@ -48,7 +48,7 @@ class VaultFileManagementFunctions {
         try await refreshItems(vaultManager: vaultManager)
     }
     
-    static func refreshItems(vaultManager: VaultManager, sortOption: SortOption = .date, isAscending: Bool = false) async throws {
+    static func refreshItems(vaultManager: VaultManager, sortOption: VaultSortOption = .date, isAscending: Bool = false) async throws {
         guard let userId = await vaultManager.currentUser?.id else {
             logger.error("Cannot refresh: No authenticated user")
             throw VaultError.authenticationFailed("Please sign in to access your vault")
