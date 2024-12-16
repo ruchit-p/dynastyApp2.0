@@ -8,7 +8,7 @@ struct SelectionOverlay: View {
     @Binding var showError: Bool
     @State private var shareSheetItems: [Any] = []
     @State private var showShareSheet = false
-    var refreshItems: () async -> Void
+    var refreshItems: () async throws -> Void
     
     let isSelected: Bool
     let action: () -> Void
@@ -93,7 +93,7 @@ struct SelectionOverlay: View {
             selectedItems.removeAll()
             vaultManager.clearItemsCache()
             isSelecting = false
-            await refreshItems()
+            try await refreshItems()
         } catch {
             self.error = error
             self.showError = true

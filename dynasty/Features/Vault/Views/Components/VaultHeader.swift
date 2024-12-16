@@ -7,10 +7,11 @@ struct VaultHeader: View {
     var currentFolderId: String?
 
     var body: some View {
-        VStack {
+        VStack(spacing: 4) {
             SearchBar(searchText: $searchText)
+                .padding(.horizontal)
             FilterBar(selectedType: $selectedType, searchText: $searchText, currentFolderId: currentFolderId)
         }
-        .padding(.top, 10)
+        .padding(.top, 4)
     }
 }

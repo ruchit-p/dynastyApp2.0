@@ -62,7 +62,13 @@ class VaultManager: ObservableObject {
     @Published private(set) var isDocumentPickerPresented = false
     @Published private(set) var isProcessing = false
     @Published private(set) var processingProgress: Double = 0
+    @Published private(set) var isUploading = false
+    @Published private(set) var isInitializing = false
     @Published var currentUser: User?
+    @Published var previewItem: VaultItem?
+    @Published var previewURL: URL?
+    @Published var isPreviewPresented = false
+    @Published private(set) var isRefreshing = false
     
     // MARK: - Private Properties
     private let encryptionService: VaultEncryptionService
@@ -79,6 +85,8 @@ class VaultManager: ObservableObject {
     // New properties for authentication tracking
     private var failedAttempts = 0
     private var lockUntil: Date?
+    
+    private var previewTempURL: URL?
     
     private init() {
         self.encryptionService = VaultEncryptionService(keychainHelper: KeychainHelper.shared)
@@ -193,50 +201,112 @@ class VaultManager: ObservableObject {
             throw VaultError.authenticationFailed("User not authenticated")
         }
         
-        guard !isLocked else { return }
+        guard isLocked else { return }
         
         let context = LAContext()
         var error: NSError?
         
-        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
-            isAuthenticating = true // Start authenticating
-            let reason = "Unlock your vault"
-            
-            do {
-                let success = try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
-                if success {
-                    await MainActor.run {
-                        self.isLocked = false
-                        self.isAuthenticating = false // Authentication finished
-                        logger.info("Vault unlocked successfully")
-                    }
-                } else {
-                    await MainActor.run {
-                        self.isAuthenticating = false // Authentication finished
-                    }
-                    throw VaultError.authenticationFailed("Biometric authentication failed")
-                }
-            } catch {
-                await MainActor.run {
-                    self.isAuthenticating = false // Authentication finished
-                }
-                logger.error("Biometric authentication error: \(error.localizedDescription)")
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            if let error = error {
+                logger.error("Biometric authentication not available: \(error.localizedDescription)")
                 throw VaultError.authenticationFailed(error.localizedDescription)
             }
-        } else if let error = error {
-            logger.error("Biometric authentication not available: \(error.localizedDescription)")
-            throw VaultError.authenticationFailed(error.localizedDescription)
+            throw VaultError.authenticationFailed("Biometric authentication not available")
+        }
+        
+        do {
+            try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock your vault")
+            
+            await MainActor.run {
+                self.isLocked = false
+                self.isInitializing = true
+            }
+            
+            // Fetch and decrypt files
+            try await initializeVault(for: userId)
+            
+            await MainActor.run {
+                self.isInitializing = false
+            }
+            
+            logger.info("Vault unlocked successfully")
+        } catch {
+            failedAttempts += 1
+            if failedAttempts >= 3 {
+                lockUntil = Date().addingTimeInterval(5 * 60) // Lock for 5 minutes
+            }
+            throw error
         }
     }
     
-    func loadItems(for userId: String) async throws {
-        logger.info("Loading vault items for user: \(userId)")
+    private func initializeVault(for userId: String) async throws {
+        logger.info("Initializing vault for user: \(userId)")
+        
+        // First load cached items if available
+        let cacheKey = "\(userId)-date-false"  // Default sort by date, descending
+        if let cachedItems = itemsCache[cacheKey] {
+            logger.info("Loading cached items while fetching fresh data")
+            self.items = cachedItems
+        }
+        
+        // Then load fresh items from database
+        try await loadItems(for: userId, sortOption: .date, isAscending: false)
+        
+        // Pre-fetch thumbnails for visible items
+        await withThrowingTaskGroup(of: Void.self) { group in
+            for item in items.prefix(10) where item.fileType == .image {
+                group.addTask {
+                    do {
+                        let data = try await self.downloadFile(item)
+                        if let image = UIImage(data: data) {
+                            let thumbnail = image.resize(to: CGSize(width: 150, height: 150))
+                            await MainActor.run {
+                                self.cacheThumbnail(thumbnail, for: item)
+                            }
+                        }
+                    } catch {
+                        self.logger.error("Failed to pre-fetch thumbnail for item \(item.id): \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+        
+        logger.info("Vault initialization completed")
+    }
+    
+    func loadItems(for userId: String, sortOption: VaultSortOption = .date, isAscending: Bool = false) async throws {
+        logger.info("Loading vault items for user: \(userId) with sorting")
+        
+        let cacheKey = "\(userId)-\(sortOption.rawValue)-\(isAscending)"
+        
+        // Always show cached items first if available
+        if let cachedItems = itemsCache[cacheKey] {
+            logger.info("Using cached items for key: \(cacheKey)")
+            await MainActor.run {
+                self.items = cachedItems
+            }
+        }
+        
+        // Then fetch fresh items
         do {
-            self.items = try await dbManager.fetchItems(for: userId, sortOption: VaultSortOption.name, isAscending: true)
-            logger.info("Successfully loaded \(self.items.count) items for user: \(userId)")
+            let fetchedItems = try await dbManager.fetchItems(for: userId, sortOption: sortOption, isAscending: isAscending)
+            await MainActor.run {
+                self.items = fetchedItems
+            }
+            // Cache the fetched items
+            cacheQueue.sync {
+                self.itemsCache[cacheKey] = fetchedItems
+            }
+            
+            logger.info("Successfully loaded \(fetchedItems.count) items for user: \(userId) and cached with key: \(cacheKey)")
         } catch {
             logger.error("Failed to load items: \(error.localizedDescription)")
-            throw error
+            // If we have cached items, don't throw the error
+            if self.items.isEmpty {
+                throw error
+            } else {
+                logger.info("Using cached items due to fetch error")
+            }
         }
     }
     
@@ -267,38 +337,6 @@ class VaultManager: ObservableObject {
 
     private var itemsCache: [String: [VaultItem]] = [:]
     private let cacheQueue = DispatchQueue(label: "com.dynasty.VaultManager.cacheQueue")
-
-
-func loadItems(for userId: String, sortOption: VaultSortOption, isAscending: Bool) async throws {
-        logger.info("Loading vault items for user: \(userId) with sorting")
-        
-        let cacheKey = "\(userId)-\(sortOption.rawValue)-\(isAscending)"
-        
-        // Check cache first
-        if let cachedItems = itemsCache[cacheKey] {
-            logger.info("Using cached items for key: \(cacheKey)")
-            await MainActor.run {
-                self.items = cachedItems
-            }
-            return
-        }
-        
-        do {
-            let fetchedItems = try await dbManager.fetchItems(for: userId, sortOption: sortOption, isAscending: isAscending)
-            await MainActor.run {
-                self.items = fetchedItems
-            }
-            // Cache the fetched items
-            cacheQueue.sync {
-                self.itemsCache[cacheKey] = fetchedItems
-            }
-            
-            logger.info("Successfully loaded \(self.items.count) items for user: \(userId) and cached with key: \(cacheKey)")
-        } catch {
-            logger.error("Failed to load items: \(error.localizedDescription)")
-            throw error
-        }
-    }
 
     func clearItemsCache() {
         cacheQueue.sync {
@@ -613,7 +651,25 @@ func downloadFile(_ item: VaultItem) async throws -> Data {
         userId: String,
         parentFolderId: String?
     ) async throws {
-        let fileData = try Data(contentsOf: url)
+        await MainActor.run { isUploading = true }
+        defer { Task { @MainActor in isUploading = false } }
+        
+        // Start accessing the security-scoped resource
+        guard url.startAccessingSecurityScopedResource() else {
+            throw VaultError.fileOperationFailed("Permission denied to access file")
+        }
+        
+        defer {
+            url.stopAccessingSecurityScopedResource()
+        }
+        
+        let fileData: Data
+        do {
+            fileData = try Data(contentsOf: url)
+        } catch {
+            throw VaultError.fileOperationFailed("Failed to read file data: \(error.localizedDescription)")
+        }
+        
         let fileType = try determineFileType(from: url)
         let encryptionKeyId = try generateEncryptionKey(for: userId)
         
@@ -817,5 +873,63 @@ func downloadFile(_ item: VaultItem) async throws -> Data {
         clearItemsCache() // Clear the cache to ensure fresh data
         try await loadItems(for: userId, sortOption: .name, isAscending: true)
         logger.info("Successfully refreshed vault items")
+    }
+    
+    func refreshVault() async throws {
+        guard let userId = currentUser?.id else {
+            throw VaultError.authenticationFailed("User not authenticated")
+        }
+        
+        await MainActor.run { isRefreshing = true }
+        defer { Task { @MainActor in isRefreshing = false } }
+        
+        logger.info("Refreshing vault contents")
+        try await loadItems(for: userId)
+        logger.info("Vault refresh completed successfully")
+    }
+    
+    func previewFile(_ item: VaultItem) async throws {
+        logger.info("Preparing preview for item: \(item.id)")
+        
+        // Clean up previous preview if exists
+        if let previousURL = previewTempURL {
+            try? FileManager.default.removeItem(at: previousURL)
+            previewTempURL = nil
+        }
+        
+        do {
+            let data = try await downloadFile(item)
+            
+            // Create temporary file for preview
+            let tempDir = FileManager.default.temporaryDirectory
+            let fileExtension = (item.metadata.originalFileName as NSString).pathExtension
+            let tempURL = tempDir.appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(fileExtension)
+            
+            try data.write(to: tempURL)
+            previewTempURL = tempURL
+            
+            await MainActor.run {
+                self.previewItem = item
+                self.previewURL = tempURL
+                self.isPreviewPresented = true
+            }
+            
+            logger.info("Preview prepared successfully for item: \(item.id)")
+        } catch {
+            logger.error("Failed to prepare preview: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    func closePreview() {
+        if let url = previewTempURL {
+            try? FileManager.default.removeItem(at: url)
+            previewTempURL = nil
+        }
+        
+        previewItem = nil
+        previewURL = nil
+        isPreviewPresented = false
     }
 }

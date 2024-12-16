@@ -45,23 +45,66 @@ struct FamilyTreeVisualization: View {
                             let position = positionForMember(selected, in: geometry.size)
 
                             // Top add button (Parent)
-                            AddButton(systemName: "plus", color: .blue)
-                                .position(x: position.x, y: position.y - 60)
+                            AddButton(
+                                actions: [
+                                    AddButtonAction(
+                                        title: "Add Parent",
+                                        systemImage: "person.badge.plus",
+                                        action: {
+                                            // Add parent action
+                                        }
+                                    )
+                                ],
+                                buttonSize: 30,
+                                backgroundColor: .blue
+                            )
+                            .position(x: position.x, y: position.y - 60)
 
                             // Right add button (Partner)
-                            AddButton(systemName: "plus", color: .green)
-                                .position(x: position.x + 60, y: position.y)
+                            AddButton(
+                                actions: [
+                                    AddButtonAction(
+                                        title: "Add Partner",
+                                        systemImage: "person.2",
+                                        action: {
+                                            // Add partner action
+                                        }
+                                    )
+                                ],
+                                buttonSize: 30,
+                                backgroundColor: .green
+                            )
+                            .position(x: position.x + 60, y: position.y)
 
                             // Bottom add button (Child)
-                            AddButton(systemName: "plus", color: .orange)
-                                .position(x: position.x, y: position.y + 60)
+                            AddButton(
+                                actions: [
+                                    AddButtonAction(
+                                        title: "Add Child",
+                                        systemImage: "person.badge.plus",
+                                        action: {
+                                            // Add child action
+                                        }
+                                    )
+                                ],
+                                buttonSize: 30,
+                                backgroundColor: .orange
+                            )
+                            .position(x: position.x, y: position.y + 60)
 
                             // Settings button
-                            AddButton(systemName: "gear", color: .gray)
-                                .position(x: position.x - 60, y: position.y)
-                                .onTapGesture {
-                                    showingMemberSettings = true
-                                }
+                            Button(action: {
+                                showingMemberSettings = true
+                            }) {
+                                Image(systemName: "gear")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
+                                    .frame(width: 30, height: 30)
+                                    .background(Color.white)
+                                    .clipShape(Circle())
+                                    .shadow(radius: 2)
+                            }
+                            .position(x: position.x - 60, y: position.y)
                         }
                     }
                     .frame(width: max(geometry.size.width * 2, 1000),
@@ -206,7 +249,3 @@ struct FamilyTreeVisualization: View {
         return CGPoint(x: x, y: y)
     }
 }
-
-
-
-

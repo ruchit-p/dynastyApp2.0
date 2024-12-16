@@ -10,7 +10,6 @@ struct VaultView: View {
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var error: Error?
     @State private var showError = false
-    @Environment(\.scenePhase) private var scenePhase
     @State private var searchText = ""
     @State private var selectedType: VaultItemType?
     @State private var currentFolderId: String?
@@ -35,41 +34,46 @@ struct VaultView: View {
         } else {
             NavigationStack {
                 VStack(spacing: 0) {
-                    VaultHeader(searchText: $searchText, selectedType: $selectedType, currentFolderId: currentFolderId)
-                    
-                    VaultItemGrid(
-                        selectedPhotos: $selectedPhotos,
-                        isSelecting: $isSelecting,
-                        selectedItems: $selectedItems,
-                        error: $error,
-                        showError: $showError,
-                        refreshItems: {
-                            do {
-                                try await VaultFileManagementFunctions.refreshItems(
-                                    vaultManager: vaultManager,
-                                    sortOption: sortOption,
-                                    isAscending: isAscending
-                                )
-                            } catch {
-                                self.error = error
-                                showError = true
+                    HStack {
+                        Text("Vault")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        Spacer()
+                        
+                        if vaultManager.isInitializing {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Loading vault...")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
                             }
-                        },
-                        filteredItems: filteredItems,
-                        columns: columns
-                    )
-                }
-                .overlay(alignment: .bottom) {
-                    VaultToolbar(
-                        showPhotoPickerSheet: $showPhotoPickerSheet,
-                        showFilePicker: $showFilePicker,
-                        showCameraScannerSheet: $showCameraScannerSheet,
-                        showNewFolderPrompt: $showNewFolderPrompt,
-                        showCameraPicker: $showCameraPicker,
-                        isSelecting: $isSelecting,
-                        selectedItems: $selectedItems,
-                        newFolderName: $newFolderName,
-                        createNewFolder: {
+                        } else if vaultManager.isUploading {
+                            UploadProgressView()
+                        }
+                        
+                        if isSelecting {
+                            SelectionModeButton(
+                                isSelecting: $isSelecting,
+                                selectedItems: $selectedItems,
+                                filteredItems: filteredItems,
+                                navigationPath: navigationPath
+                            )
+                        } else {
+                            NavigationMenu(
+                                isSelecting: $isSelecting,
+                                showNewFolderPrompt: $showNewFolderPrompt,
+                                navigationPath: navigationPath
+                            )
+                            SortMenu(filteredItems: filteredItems)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .confirmationDialog("Create New Folder", isPresented: $showNewFolderPrompt) {
+                        TextField("Folder Name", text: $newFolderName)
+                        Button("Create") {
                             Task {
                                 do {
                                     try await VaultFileManagementFunctions.createNewFolder(
@@ -82,33 +86,111 @@ struct VaultView: View {
                                     self.error = error
                                     showError = true
                                 }
-
                             }
-                        },
-                        filteredItems: filteredItems,
-                        navigationPath: navigationPath
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Enter a name for the new folder.")
+                    }
+                    
+                    VaultHeader(searchText: $searchText, selectedType: $selectedType, currentFolderId: currentFolderId)
+                        .padding(.top, 4)
+                    
+                    VaultContentView(
+                        selectedItems: $selectedItems,
+                        isSelecting: $isSelecting,
+                        error: $error,
+                        showError: $showError,
+                        selectedType: selectedType,
+                        currentFolderId: currentFolderId
                     )
                 }
+                .navigationBarHidden(true)
                 .navigationTitle(currentFolderName ?? "Vault")
                 .navigationBarTitleDisplayMode(currentFolderId == nil ? .large : .inline)
+                .overlay(alignment: .bottomTrailing) {
+                    AddButton(
+                        actions: [
+                            AddButtonAction(
+                                title: "Take Photo",
+                                systemImage: "camera",
+                                action: {
+                                    showCameraPicker = true
+                                }
+                            ),
+                            AddButtonAction(
+                                title: "Scan Document",
+                                systemImage: "doc.viewfinder",
+                                action: {
+                                    showCameraScannerSheet = true
+                                }
+                            ),
+                            AddButtonAction(
+                                title: "Upload File",
+                                systemImage: "folder",
+                                action: {
+                                    showFilePicker = true
+                                }
+                            ),
+                            AddButtonAction(
+                                title: "Choose from Library",
+                                systemImage: "photo.on.rectangle",
+                                action: {
+                                    showPhotoPickerSheet = true
+                                }
+                            )
+                        ]
+                    )
+                }
+                .sheet(isPresented: $showPhotoPickerSheet) {
+                    NavigationView {
+                        List {
+                            PhotosPicker(selection: $selectedPhotos,
+                                       matching: .images) {
+                                Label("Choose from Library", systemImage: "photo.on.rectangle")
+                            }
+                        }
+                        .navigationTitle("Upload")
+                        .navigationBarItems(trailing: Button("Cancel") {
+                            showPhotoPickerSheet = false
+                        })
+                    }
+                }
             }
-            .photosPicker(isPresented: $showPhotoPickerSheet, selection: $selectedPhotos)
             .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item]) { result in
                 Task {
                     switch result {
                     case .success(let url):
-                        await VaultFileManagementFunctions.handleFileImport(.success([url]), vaultManager: vaultManager, currentFolderId: currentFolderId)
-                        case .failure(let error):
-                        await VaultFileManagementFunctions.handleFileImport(.failure(error), vaultManager: vaultManager, currentFolderId: currentFolderId)
+                        do {
+                            try await VaultFileManagementFunctions.handleFileImport(.success([url]), vaultManager: vaultManager, currentFolderId: currentFolderId)
+                        } catch {
+                            self.error = VaultError.fileOperationFailed("Failed to import file: \(error.localizedDescription)")
+                            showError = true
+                        }
+                    case .failure(let error):
+                        self.error = VaultError.fileOperationFailed("Failed to import file: \(error.localizedDescription)")
+                        showError = true
                     }
                 }
             }
-            .onChange(of: selectedPhotos) {
+            .onChange(of: selectedPhotos) { oldValue, newValue in
                 Task {
-                    await VaultPhotoHandlingFunctions.handleSelectedPhotos(selectedPhotos, vaultManager: vaultManager, authManager: authManager)
+                    await VaultPhotoHandlingFunctions.handleSelectedPhotos(newValue, vaultManager: vaultManager, authManager: authManager)
                 }
             }
+            .onChange(of: authManager.user) { oldValue, newValue in
+                VaultAuthenticationFunctions.handleUserChange(newValue, vaultManager: vaultManager, authManager: authManager)
+            }
             .errorOverlay(error: error, isPresented: $showError)
+            .overlay {
+                PreviewView(isPresented: $vaultManager.isPreviewPresented)
+                    .ignoresSafeArea()
+            }
+            .onChange(of: vaultManager.isPreviewPresented) { oldValue, newValue in
+                if !newValue {
+                    vaultManager.closePreview()
+                }
+            }
         }
     }
     
@@ -121,38 +203,34 @@ struct VaultView: View {
     }
     
     private var filteredItems: [VaultItem] {
-        var items = vaultManager.items.filter { !$0.isDeleted }
-        items = filterItemsByFolder(items)
-        items = filterItemsBySearchText(items)
-        items = filterItemsByType(items)
-        return items
+        vaultManager.items.filter { item in
+            selectedType == nil || item.fileType == selectedType
+        }
     }
     
-    private func filterItemsByFolder(_ items: [VaultItem]) -> [VaultItem] {
-        items.filter { item in
-            if let folderId = currentFolderId {
-                return item.parentFolderId == folderId
-            } else {
-                return item.parentFolderId == nil
+    private func handleRefresh() async {
+        do {
+            try await vaultManager.refreshVault()
+        } catch {
+            self.error = error
+            showError = true
+        }
+    }
+}
+
+struct PreviewView: View {
+    @EnvironmentObject private var vaultManager: VaultManager
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        Group {
+            if let url = vaultManager.previewURL, isPresented {
+                QuickLookPreview(url: url, isPresented: $isPresented)
             }
-        }
-    }
-
-    private func filterItemsBySearchText(_ items: [VaultItem]) -> [VaultItem] {
-        items.filter { item in
-            searchText.isEmpty ||
-            item.title.localizedCaseInsensitiveContains(searchText) ||
-            (item.description?.localizedCaseInsensitiveContains(searchText) ?? false)
-        }
-    }
-
-    private func filterItemsByType(_ items: [VaultItem]) -> [VaultItem] {
-        items.filter { item in
-            selectedType == nil || item.fileType == selectedType
         }
     }
 }
 
 #Preview {
     VaultView()
-} 
+}

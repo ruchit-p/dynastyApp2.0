@@ -11,55 +11,78 @@ struct PlusButtonsOverlay: View {
         GeometryReader { geometry in
             VStack {
                 Spacer()
-                // Position the plus buttons around the node
                 HStack {
                     Spacer()
                     ZStack {
                         // Circle representing the selected member
                         FamilyMemberNodeView(member: selectedMember)
+                        
                         // Top Plus Button for Parent
-                        Button(action: {
-                            relationType = .parent
-                            showingAddFamilyMemberForm = true
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .resizable()
-                                .frame(width: 30, height: 30)
-                                .foregroundColor(.blue)
-                        }
+                        AddButton(
+                            actions: [
+                                AddButtonAction(
+                                    title: "Add Parent",
+                                    systemImage: "person.badge.plus",
+                                    action: {
+                                        relationType = .parent
+                                        showingAddFamilyMemberForm = true
+                                    }
+                                )
+                            ],
+                            buttonSize: 30,
+                            backgroundColor: .blue
+                        )
                         .offset(x: 0, y: -60)
+                        
                         // Right Plus Button for Partner
-                        Button(action: {
-                            relationType = .partner
-                            showingAddFamilyMemberForm = true
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .resizable()
-                                .frame(width: 30, height: 30)
-                                .foregroundColor(.green)
-                        }
+                        AddButton(
+                            actions: [
+                                AddButtonAction(
+                                    title: "Add Partner",
+                                    systemImage: "person.2",
+                                    action: {
+                                        relationType = .partner
+                                        showingAddFamilyMemberForm = true
+                                    }
+                                )
+                            ],
+                            buttonSize: 30,
+                            backgroundColor: .green
+                        )
                         .offset(x: 60, y: 0)
+                        
                         // Bottom Plus Button for Child
-                        Button(action: {
-                            relationType = .child
-                            showingAddFamilyMemberForm = true
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .resizable()
-                                .frame(width: 30, height: 30)
-                                .foregroundColor(.orange)
-                        }
+                        AddButton(
+                            actions: [
+                                AddButtonAction(
+                                    title: "Add Child",
+                                    systemImage: "person.badge.plus",
+                                    action: {
+                                        relationType = .child
+                                        showingAddFamilyMemberForm = true
+                                    }
+                                )
+                            ],
+                            buttonSize: 30,
+                            backgroundColor: .orange
+                        )
                         .offset(x: 0, y: 60)
+                        
                         // Left Plus Button for Sibling
-                        Button(action: {
-                            relationType = .sibling
-                            showingAddFamilyMemberForm = true
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .resizable()
-                                .frame(width: 30, height: 30)
-                                .foregroundColor(.purple)
-                        }
+                        AddButton(
+                            actions: [
+                                AddButtonAction(
+                                    title: "Add Sibling",
+                                    systemImage: "person.2.square.stack",
+                                    action: {
+                                        relationType = .sibling
+                                        showingAddFamilyMemberForm = true
+                                    }
+                                )
+                            ],
+                            buttonSize: 30,
+                            backgroundColor: .purple
+                        )
                         .offset(x: -60, y: 0)
                     }
                     Spacer()
@@ -82,4 +105,4 @@ struct PlusButtonsOverlay: View {
             }
         }
     }
-} 
+}

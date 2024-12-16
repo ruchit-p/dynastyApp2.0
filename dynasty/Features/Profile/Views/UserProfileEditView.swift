@@ -19,7 +19,6 @@ struct UserProfileEditView: View {
     @State private var alertMessage = ""
     @EnvironmentObject private var authManager: AuthManager
     
-    // Logger for error and event tracking
     private let logger = Logger(subsystem: "com.dynasty.UserProfileEditView", category: "Profile")
 
     init(currentUser: User) {
@@ -32,58 +31,42 @@ struct UserProfileEditView: View {
 
     var body: some View {
         NavigationView {
-            Form {
-                // Avatar Section
-                Section(header: Text("Profile Picture")) {
-                    VStack {
-                        if let selectedImage = selectedImage {
-                            Image(uiImage: selectedImage)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 150, height: 150)
-                                .clipShape(Circle())
-                        } else if let user = viewModel.user, let photoURL = user.photoURL, let url = URL(string: photoURL) {
-                            AsyncImage(url: url) { image in
-                                image.resizable()
-                            } placeholder: {
-                                ProgressView()
-                            }
-                            .frame(width: 150, height: 150)
-                            .clipShape(Circle())
-                        } else {
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
-                                .frame(width: 150, height: 150)
-                        }
-
-                        Button("Change Profile Picture") {
-                            isShowingImagePicker = true
-                        }
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Profile Header
+                    VStack(spacing: 16) {
+                        profileImage
                         
-                        if isUploading {
-                            ProgressView("Uploading", value: uploadProgress, total: 1.0)
-                        }
+                        Text("Hey, \(firstName)!")
+                            .font(.title)
+                            .fontWeight(.semibold)
                     }
+                    .padding(.top, 20)
+                    
+                    // Personal Information Section
+                    VStack(spacing: 8) {
+                        personalInfoSection
+                    }
+                    .background(Color(.systemBackground))
+                    .cornerRadius(15)
+                    .shadow(radius: 2)
+                    
+                    // Save Changes Button
+                    Button(action: saveChanges) {
+                        Text("Save Changes")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(15)
+                    }
+                    .padding(.top)
                 }
-                
-                Section(header: Text("Personal Information")) {
-                    TextField("First Name", text: $firstName)
-                    TextField("Last Name", text: $lastName)
-                    TextField("Email", text: $email)
-                        .keyboardType(.emailAddress)
-                    TextField("Phone Number", text: $phoneNumber)
-                        .keyboardType(.phonePad)
-                }
+                .padding()
             }
             .navigationTitle("Edit Profile")
-            .navigationBarItems(
-                leading: Button("Cancel") {
-                    dismiss()
-                },
-                trailing: Button("Save") {
-                    saveChanges()
-                }
-            )
+            .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $isShowingImagePicker) {
                 ImagePicker(selectedImage: $selectedImage)
             }
@@ -98,6 +81,80 @@ struct UserProfileEditView: View {
                 }
             })
         }
+    }
+    
+    private var profileImage: some View {
+        VStack {
+            if let selectedImage = selectedImage {
+                Image(uiImage: selectedImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 100, height: 100)
+                    .clipShape(Circle())
+            } else if let user = viewModel.user, let photoURL = user.photoURL, let url = URL(string: photoURL) {
+                AsyncImage(url: url) { image in
+                    image.resizable()
+                } placeholder: {
+                    ProgressView()
+                }
+                .frame(width: 100, height: 100)
+                .clipShape(Circle())
+            } else {
+                Image(systemName: "person.circle.fill")
+                    .resizable()
+                    .frame(width: 100, height: 100)
+                    .foregroundColor(.blue)
+            }
+            
+            Button("Change Profile Picture") {
+                isShowingImagePicker = true
+            }
+            .foregroundColor(.blue)
+            .padding(.top, 8)
+            
+            if isUploading {
+                ProgressView("Uploading", value: uploadProgress, total: 1.0)
+                    .padding(.top, 8)
+            }
+        }
+    }
+    
+    private var personalInfoSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: "person.fill")
+                    .foregroundColor(.blue)
+                    .frame(width: 30)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Personal Information")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text("Update your profile details")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+            }
+            
+            VStack(spacing: 12) {
+                TextField("First Name", text: $firstName)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Last Name", text: $lastName)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Email", text: $email)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .keyboardType(.emailAddress)
+                TextField("Phone Number", text: $phoneNumber)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .keyboardType(.phonePad)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(10)
     }
 
     private func saveChanges() {

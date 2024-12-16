@@ -1,23 +1,30 @@
 import SwiftUI
 import os.log
+import FirebaseAuth 
+import FirebaseFirestore
 
 class VaultAuthenticationFunctions {
     private static let logger = Logger(subsystem: "com.dynasty.VaultView", category: "Authentication")
     
-    @MainActor static func handleUserChange(_ user: User?, vaultManager: VaultManager) {
+    @MainActor static func handleUserChange(_ user: User?, vaultManager: VaultManager, authManager: AuthManager) {
         guard let user = user, let userId = user.id else {
             vaultManager.lock()
             return
         }
         
         vaultManager.setCurrentUser(user)
-        authenticate(userId: userId, vaultManager: vaultManager)
+        authenticate(userId: userId, vaultManager: vaultManager, authManager: authManager)
     }
     
-    @MainActor static func authenticate(userId: String, vaultManager: VaultManager) {
+    @MainActor static func authenticate(userId: String, vaultManager: VaultManager, authManager: AuthManager) {
         guard !vaultManager.isAuthenticating else { return }
         
         logger.info("Starting vault authentication for user: \(userId)")
+        
+        // Use the current user from authManager
+        if let user = authManager.user {
+            vaultManager.setCurrentUser(user)
+        }
         
         Task {
             do {

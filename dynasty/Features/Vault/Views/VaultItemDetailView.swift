@@ -44,6 +44,12 @@ struct VaultItemDetailView: View {
                         showRenameSheet = true
                     }
                 )
+            } else if showQuickLook, let url = previewURL {
+                QuickLookPreview(
+                    url: url,
+                    isPresented: $showQuickLook,
+                    displayName: document.title
+                )
             } else {
                 List {
                     if let previewImage = previewImage, document.fileType == .image {
@@ -373,48 +379,5 @@ struct VaultItemDetailView: View {
         case .folder:
             return "folder.fill"
         }
-    }
-}
-
-struct QuickLookPreview: UIViewControllerRepresentable {
-    let url: URL
-    let displayName: String
-    
-    func makeUIViewController(context: Context) -> QLPreviewController {
-        let controller = QLPreviewController()
-        controller.dataSource = context.coordinator
-        return controller
-    }
-    
-    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {}
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-    
-    class Coordinator: NSObject, QLPreviewControllerDataSource {
-        let parent: QuickLookPreview
-        
-        init(_ parent: QuickLookPreview) {
-            self.parent = parent
-        }
-        
-        func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-            return 1
-        }
-        
-        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-            return PreviewItem(url: parent.url, title: parent.displayName)
-        }
-    }
-}
-
-class PreviewItem: NSObject, QLPreviewItem {
-    let previewItemURL: URL?
-    let previewItemTitle: String?
-    
-    init(url: URL, title: String) {
-        self.previewItemURL = url
-        self.previewItemTitle = title
     }
 }

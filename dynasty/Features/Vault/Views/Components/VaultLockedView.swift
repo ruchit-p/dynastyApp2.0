@@ -20,7 +20,7 @@ struct VaultLockedView: View {
                 Task {
                     // Ensure you're passing the current user's ID here
                     if let userId = authManager.user?.id {
-                        VaultAuthenticationFunctions.authenticate(userId: userId, vaultManager: vaultManager)
+                        VaultAuthenticationFunctions.authenticate(userId: userId, vaultManager: vaultManager, authManager: authManager)
                     } else {
                         // Handle the case where the user ID is not available
                         error = VaultError.authenticationFailed("User not found")

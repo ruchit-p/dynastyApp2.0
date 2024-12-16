@@ -22,7 +22,7 @@ struct RichTextEditorView: View {
     @State private var alignment: ContentElement.TextAlignment = .leading
 
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
             // Main Content Area
             ContentScrollView(
                 contentElements: $contentElements,
@@ -35,21 +35,30 @@ struct RichTextEditorView: View {
                 textColor: $textColor,
                 alignment: $alignment
             )
-
-            // Toolbars
-            ToolbarsView(
-                isEditorFocused: isEditorFocused,
-                isBold: $isBold,
-                isItalic: $isItalic,
-                isUnderlined: $isUnderlined,
-                highlightColor: $highlightColor,
-                textColor: $textColor,
-                alignment: $alignment,
-                mediaPickerType: $mediaPickerType,
-                showMediaPicker: $showMediaPicker,
-                applyFormatting: { applyFormattingToSelectedText() }
-            )
+            
+            if isEditorFocused {
+                Divider()
+                    .background(Color.gray.opacity(0.3))
+                
+                // Keyboard Toolbar
+                ToolbarsView(
+                    isEditorFocused: isEditorFocused,
+                    isBold: $isBold,
+                    isItalic: $isItalic,
+                    isUnderlined: $isUnderlined,
+                    highlightColor: $highlightColor,
+                    textColor: $textColor,
+                    alignment: $alignment,
+                    mediaPickerType: $mediaPickerType,
+                    showMediaPicker: $showMediaPicker,
+                    applyFormatting: { applyFormattingToSelectedText() }
+                )
+                .padding(.vertical, 8)
+                .background(Color(UIColor.systemBackground))
+                .transition(.move(edge: .bottom))
+            }
         }
+        .animation(.easeInOut, value: isEditorFocused)
         .sheet(isPresented: $showMediaPicker) {
             MediaPicker(mediaType: $mediaPickerType, selectedMediaURL: $selectedMediaURL)
         }
