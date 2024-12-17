@@ -124,6 +124,27 @@ struct FamilyMember: Identifiable, Codable, Hashable {
         )
     }
     
+    // MARK: - FamilyTreeNode Conversion
+    init(fromNode node: FamilyTreeNode) {
+        self.id = node.id
+        self.firstName = node.firstName
+        self.lastName = node.lastName
+        self.email = node.email ?? ""
+        self.displayName = "\(node.firstName) \(node.lastName)"
+        self.dateOfBirth = node.dateOfBirth
+        self.profileImageURL = node.photoURL
+        self.parentIds = node.parentIds
+        self.childrenIds = node.childrenIds
+        self.spouseId = node.spouseIds.first
+        self.generation = node.generation
+        self.isRegisteredUser = node.isRegisteredUser
+        self.gender = Gender(rawValue: node.gender.rawValue) ?? .notSpecified
+        self.isAdmin = false  // Default values for admin properties
+        self.canAddMembers = false
+        self.canEdit = node.canEdit
+        self.updatedAt = node.updatedAt
+    }
+    
     // MARK: - Helper Methods
     func fullName() -> String {
         return displayName

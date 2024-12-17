@@ -13,14 +13,16 @@ struct UserProfileEditView: View {
     @State private var phoneNumber: String
     @State private var isShowingImagePicker = false
     @State private var selectedImage: UIImage?
-    @State private var isUploading = false
-    @State private var uploadProgress: Double = 0
-    @State private var showAlert = false
+    @State private var showingDiscardAlert = false
+    @State private var showingSaveAlert = false
+    @State private var showingErrorAlert = false
     @State private var alertMessage = ""
+    @State private var showingValidationAlert = false
     @EnvironmentObject private var authManager: AuthManager
     
     private let logger = Logger(subsystem: "com.dynasty.UserProfileEditView", category: "Profile")
-
+    private let analytics = AnalyticsService.shared
+    
     init(currentUser: User) {
         self._viewModel = StateObject(wrappedValue: UserProfileEditViewModel(user: currentUser))
         self._firstName = State(initialValue: currentUser.firstName ?? "")
@@ -28,11 +30,22 @@ struct UserProfileEditView: View {
         self._email = State(initialValue: currentUser.email)
         self._phoneNumber = State(initialValue: currentUser.phoneNumber ?? "")
     }
-
+    
+    var hasChanges: Bool {
+        guard let user = viewModel.user else { return false }
+        return firstName != (user.firstName ?? "") ||
+            lastName != (user.lastName ?? "") ||
+            email != user.email ||
+            phoneNumber != (user.phoneNumber ?? "") ||
+            selectedImage != nil
+    }
+    
     var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(spacing: 20) {
+        ScrollView {
+            VStack(spacing: 20) {
+                if viewModel.isLoading {
+                    LoadingView(message: "Saving changes...")
+                } else {
                     // Profile Header
                     VStack(spacing: 16) {
                         profileImage
@@ -41,15 +54,53 @@ struct UserProfileEditView: View {
                             .font(.title)
                             .fontWeight(.semibold)
                     }
-                    .padding(.top, 20)
+                    .padding(.vertical, 20)
                     
-                    // Personal Information Section
-                    VStack(spacing: 8) {
-                        personalInfoSection
+                    // Personal Information
+                    SettingsSection(title: "Personal Information") {
+                        VStack(spacing: 12) {
+                            CustomTextField(
+                                icon: "person.fill",
+                                title: "First Name",
+                                text: $firstName,
+                                contentType: .givenName,
+                                error: viewModel.validationErrors["firstName"]
+                            )
+                            
+                            CustomTextField(
+                                icon: "person.fill",
+                                title: "Last Name",
+                                text: $lastName,
+                                contentType: .familyName,
+                                error: viewModel.validationErrors["lastName"]
+                            )
+                            
+                            CustomTextField(
+                                icon: "envelope.fill",
+                                title: "Email",
+                                text: $email,
+                                contentType: .emailAddress,
+                                keyboardType: .emailAddress,
+                                error: viewModel.validationErrors["email"]
+                            )
+                            
+                            CustomTextField(
+                                icon: "phone.fill",
+                                title: "Phone Number",
+                                text: $phoneNumber,
+                                contentType: .telephoneNumber,
+                                keyboardType: .phonePad,
+                                error: viewModel.validationErrors["phone"]
+                            )
+                            
+                            if let formError = viewModel.validationErrors["form"] {
+                                Text(formError)
+                                    .foregroundColor(.red)
+                                    .font(.caption)
+                                    .padding(.top, 4)
+                            }
+                        }
                     }
-                    .background(Color(.systemBackground))
-                    .cornerRadius(15)
-                    .shadow(radius: 2)
                     
                     // Save Changes Button
                     Button(action: saveChanges) {
@@ -58,53 +109,87 @@ struct UserProfileEditView: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(Color.blue)
+                            .background(hasChanges ? Color.blue : Color.gray)
                             .cornerRadius(15)
                     }
+                    .disabled(!hasChanges)
                     .padding(.top)
                 }
-                .padding()
             }
-            .navigationTitle("Edit Profile")
-            .navigationBarTitleDisplayMode(.large)
-            .sheet(isPresented: $isShowingImagePicker) {
-                ImagePicker(selectedImage: $selectedImage)
-            }
-            .alert(isPresented: $showAlert) {
-                Alert(title: Text("Error"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
-            }
-            .overlay(Group {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black.opacity(0.3))
-                }
-            })
+            .padding()
         }
+        .navigationTitle("Edit Profile")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarItems(
+            trailing: Button("Cancel") {
+                if hasChanges {
+                    showingDiscardAlert = true
+                } else {
+                    dismiss()
+                }
+            }
+        )
+        .sheet(isPresented: $isShowingImagePicker) {
+            ImagePicker(selectedImage: $selectedImage)
+        }
+        .alert("Discard Changes?", isPresented: $showingDiscardAlert) {
+            Button("Discard", role: .destructive) { dismiss() }
+            Button("Keep Editing", role: .cancel) { }
+        } message: {
+            Text("Are you sure you want to discard your changes?")
+        }
+        .alert(isPresented: $showingSaveAlert) {
+            Alert(
+                title: Text(viewModel.error == nil ? "Success" : "Error"),
+                message: Text(alertMessage),
+                dismissButton: .default(Text("OK")) {
+                    if viewModel.error == nil {
+                        dismiss()
+                    }
+                }
+            )
+        }
+        .errorOverlay(error: viewModel.error, isPresented: $showingErrorAlert) {
+            viewModel.error = nil
+        }
+        .onAppear {
+            analytics.logProfileView()
+            viewModel.loadCachedProfile()
+        }
+        .onChange(of: firstName) { _ in viewModel.clearValidationErrors() }
+        .onChange(of: lastName) { _ in viewModel.clearValidationErrors() }
+        .onChange(of: email) { _ in viewModel.clearValidationErrors() }
+        .onChange(of: phoneNumber) { _ in viewModel.clearValidationErrors() }
     }
     
     private var profileImage: some View {
         VStack {
-            if let selectedImage = selectedImage {
-                Image(uiImage: selectedImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 100, height: 100)
-                    .clipShape(Circle())
-            } else if let user = viewModel.user, let photoURL = user.photoURL, let url = URL(string: photoURL) {
-                AsyncImage(url: url) { image in
-                    image.resizable()
-                } placeholder: {
-                    ProgressView()
+            Group {
+                if let selectedImage = selectedImage {
+                    Image(uiImage: selectedImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 100, height: 100)
+                        .clipShape(Circle())
+                } else if let imageURL = viewModel.profileImageURL {
+                    AsyncImage(url: imageURL) { image in
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 100, height: 100)
+                            .clipShape(Circle())
+                    } placeholder: {
+                        ProgressView()
+                            .frame(width: 100, height: 100)
+                    }
+                } else {
+                    Image(systemName: "person.circle.fill")
+                        .resizable()
+                        .frame(width: 100, height: 100)
+                        .foregroundColor(.blue)
                 }
-                .frame(width: 100, height: 100)
-                .clipShape(Circle())
-            } else {
-                Image(systemName: "person.circle.fill")
-                    .resizable()
-                    .frame(width: 100, height: 100)
-                    .foregroundColor(.blue)
             }
+            .accessibilityLabel("Profile photo")
             
             Button("Change Profile Picture") {
                 isShowingImagePicker = true
@@ -112,144 +197,106 @@ struct UserProfileEditView: View {
             .foregroundColor(.blue)
             .padding(.top, 8)
             
-            if isUploading {
-                ProgressView("Uploading", value: uploadProgress, total: 1.0)
+            if viewModel.isUploading {
+                ProgressView("Uploading", value: viewModel.uploadProgress, total: 1.0)
                     .padding(.top, 8)
             }
         }
     }
     
-    private var personalInfoSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Image(systemName: "person.fill")
-                    .foregroundColor(.blue)
-                    .frame(width: 30)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Personal Information")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    Text("Update your profile details")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-            }
-            
-            VStack(spacing: 12) {
-                TextField("First Name", text: $firstName)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                TextField("Last Name", text: $lastName)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                TextField("Email", text: $email)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .keyboardType(.emailAddress)
-                TextField("Phone Number", text: $phoneNumber)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .keyboardType(.phonePad)
-            }
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(10)
-    }
-
     private func saveChanges() {
         guard let uid = Auth.auth().currentUser?.uid else {
             logger.error("User not authenticated.")
-            showAlert(message: "User not authenticated.")
+            alertMessage = "User not authenticated."
+            showingSaveAlert = true
             return
         }
-
-        var updatedData: [String: Any] = [
-            "firstName": firstName,
-            "lastName": lastName,
-            "email": email,
-            "phoneNumber": phoneNumber
-        ]
-
-        if let selectedImage = selectedImage {
-            isUploading = true
-            uploadProfileImage(image: selectedImage) { result in
-                isUploading = false
-                switch result {
-                case .success(let photoURL):
-                    updatedData["photoURL"] = photoURL
-                    saveUserData(userId: uid, data: updatedData)
-                case .failure(let error):
-                    logger.error("Image upload failed: \(error.localizedDescription)")
-                    showAlert(message: "Failed to upload image. Please try again.")
-                }
-            }
-        } else {
-            saveUserData(userId: uid, data: updatedData)
-        }
-    }
-
-    private func saveUserData(userId: String, data: [String: Any]) {
+        
         Task {
             do {
-                try await viewModel.updateProfile(userId: userId, updatedData: data)
+                var updatedData: [String: Any] = [
+                    "firstName": firstName,
+                    "lastName": lastName,
+                    "email": email,
+                    "phoneNumber": phoneNumber
+                ]
+                
+                if let selectedImage = selectedImage {
+                    let photoURL = try await viewModel.uploadProfileImage(image: selectedImage)
+                    updatedData["photoURL"] = photoURL
+                }
+                
+                try await viewModel.updateProfile(userId: uid, updatedData: updatedData)
                 await MainActor.run {
-                    dismiss()
+                    alertMessage = "Profile updated successfully!"
+                    showingSaveAlert = true
                     Task {
                         await authManager.fetchAndUpdateUser()
                     }
                 }
             } catch {
                 await MainActor.run {
-                    logger.error("Error saving user data: \(error.localizedDescription)")
-                    showAlert(message: "Failed to save profile. Please try again.")
+                    logger.error("Error saving profile: \(error.localizedDescription)")
+                    viewModel.error = error
+                    showingErrorAlert = true
                 }
             }
         }
-    }
-
-    private func uploadProfileImage(image: UIImage, completion: @escaping (Result<String, Error>) -> Void) {
-        guard let imageData = image.jpegData(compressionQuality: 0.5) else {
-            logger.error("Invalid image data.")
-            completion(.failure(ProfileError.invalidImage))
-            return
-        }
-
-        let storageRef = Storage.storage().reference()
-        let photoRef = storageRef.child("profile_images/\(viewModel.user?.id ?? UUID().uuidString).jpg")
-
-        let metadata = StorageMetadata()
-        metadata.contentType = "image/jpeg"
-
-        let uploadTask = photoRef.putData(imageData, metadata: metadata) { metadata, error in
-            if let error = error {
-                logger.error("Storage upload error: \(error.localizedDescription)")
-                completion(.failure(error))
-                return
-            }
-
-            photoRef.downloadURL { url, error in
-                if let error = error {
-                    logger.error("Error getting download URL: \(error.localizedDescription)")
-                    completion(.failure(error))
-                } else if let url = url {
-                    logger.info("Image uploaded successfully: \(url.absoluteString)")
-                    completion(.success(url.absoluteString))
-                }
-            }
-        }
-
-        uploadTask.observe(.progress) { snapshot in
-            uploadProgress = Double(snapshot.progress?.completedUnitCount ?? 0) / Double(snapshot.progress?.totalUnitCount ?? 1)
-        }
-    }
-    
-    private func showAlert(message: String) {
-        alertMessage = message
-        showAlert = true
     }
 }
 
-enum ProfileError: Error {
-    case invalidImage
+struct CustomTextField: View {
+    let icon: String
+    let title: String
+    @Binding var text: String
+    var contentType: UITextContentType? = nil
+    var keyboardType: UIKeyboardType = .default
+    var error: String? = nil
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundColor(.blue)
+                    .frame(width: 30)
+                
+                TextField(title, text: $text)
+                    .textContentType(contentType)
+                    .keyboardType(keyboardType)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+            }
+            
+            if let error = error {
+                Text(error)
+                    .foregroundColor(.red)
+                    .font(.caption)
+                    .padding(.leading, 30)
+            }
+        }
+    }
+}
+
+#Preview {
+    let previewUser = User(
+        id: "preview",
+        displayName: "John Doe",
+        email: "john@example.com",
+        dateOfBirth: Date(),
+        firstName: "John",
+        lastName: "Doe",
+        phoneNumber: "+1234567890",
+        familyTreeID: nil,
+        historyBookID: nil,
+        parentIds: [],
+        childrenIds: [],
+        isAdmin: false,
+        canAddMembers: true,
+        canEdit: true,
+        photoURL: nil,
+        createdAt: Timestamp(),
+        updatedAt: nil
+    )
+    
+    return UserProfileEditView(currentUser: previewUser)
+        .environmentObject(AuthManager())
 }

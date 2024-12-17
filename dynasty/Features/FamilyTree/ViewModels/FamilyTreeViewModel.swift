@@ -1,10 +1,12 @@
 import Foundation
 import FirebaseFirestore
 import Combine
+import SwiftUI
 
 @MainActor
 class FamilyTreeViewModel: ObservableObject {
     @Published private(set) var nodes: [String: FamilyTreeNode] = [:]
+    @Published private(set) var nodePositions: [String: NodePosition] = [:]
     @Published private(set) var isLoading = false
     @Published var error: Error?
     @Published var selectedNodeId: String?
@@ -12,8 +14,11 @@ class FamilyTreeViewModel: ObservableObject {
     
     private let db = FirestoreManager.shared.getDB()
     private var cancellables = Set<AnyCancellable>()
-    private let treeId: String
+    let treeId: String
     private let userId: String
+    
+    private let levelHeight: CGFloat = 120
+    private let nodeWidth: CGFloat = 100
     
     init(treeId: String, userId: String) {
         self.treeId = treeId
@@ -50,7 +55,67 @@ class FamilyTreeViewModel: ObservableObject {
                         self.error = error
                     }
                 }
+                
+                // Recalculate positions when nodes change
+                self.calculateNodePositions()
             }
+    }
+    
+    private func calculateNodePositions() {
+        var newPositions: [String: NodePosition] = [:]
+        var nodesByLevel: [Int: [String]] = [:]
+        var processed: Set<String> = []
+        
+        // Find root nodes (nodes without parents)
+        let rootNodes = nodes.values.filter { node in
+            node.parentIds.isEmpty || !node.parentIds.contains { parentId in
+                nodes.keys.contains(parentId)
+            }
+        }
+        
+        // Assign levels starting from root nodes
+        func assignLevels(nodeId: String, level: Int) {
+            guard !processed.contains(nodeId),
+                  let node = nodes[nodeId] else { return }
+            
+            processed.insert(nodeId)
+            nodesByLevel[level, default: []].append(nodeId)
+            
+            // Process children
+            for childId in nodes.values.filter({ $0.parentIds.contains(nodeId) }).map({ $0.id }) {
+                assignLevels(nodeId: childId, level: level + 1)
+            }
+            
+            // Process spouses on the same level
+            for spouseId in node.spouseIds {
+                if !processed.contains(spouseId) {
+                    assignLevels(nodeId: spouseId, level: level)
+                }
+            }
+        }
+        
+        // Start assigning levels from root nodes
+        for node in rootNodes {
+            assignLevels(nodeId: node.id, level: 0)
+        }
+        
+        // Calculate positions based on levels
+        let maxLevel = nodesByLevel.keys.max() ?? 0
+        
+        for level in 0...maxLevel {
+            if let nodesInLevel = nodesByLevel[level] {
+                let levelWidth = CGFloat(nodesInLevel.count - 1) * nodeWidth
+                let startX = -levelWidth / 2
+                
+                for (index, nodeId) in nodesInLevel.enumerated() {
+                    let x = startX + CGFloat(index) * nodeWidth
+                    let y = CGFloat(level) * levelHeight
+                    newPositions[nodeId] = NodePosition(x: x, y: y)
+                }
+            }
+        }
+        
+        nodePositions = newPositions
     }
     
     // MARK: - Node Operations
@@ -210,6 +275,31 @@ class FamilyTreeViewModel: ObservableObject {
     
     // MARK: - Helper Methods
     
+    func getCurrentUserNode() -> FamilyTreeNode? {
+        // If the nodes are empty, create a temporary node for the current user
+        if nodes.isEmpty {
+            return FamilyTreeNode(
+                id: userId,
+                firstName: "You",  // This will be updated when we load the actual data
+                lastName: "",
+                dateOfBirth: nil,
+                gender: .unknown,
+                email: nil,
+                phoneNumber: nil,
+                photoURL: nil,
+                parentIds: [],
+                spouseIds: [],
+                childrenIds: [],
+                isRegisteredUser: true,
+                canEdit: true,
+                updatedAt: Timestamp()
+            )
+        }
+        
+        // Otherwise, find the user's node in the existing nodes
+        return nodes[userId]
+    }
+    
     func canEdit(_ nodeId: String) -> Bool {
         guard let node = nodes[nodeId] else { return false }
         return node.canEdit
@@ -233,4 +323,9 @@ class FamilyTreeViewModel: ObservableObject {
         guard let node = nodes[nodeId] else { return [] }
         return node.childrenIds.compactMap { nodes[$0] }
     }
-} 
+}
+
+struct NodePosition {
+    let x: CGFloat
+    let y: CGFloat
+}

@@ -1,39 +1,28 @@
 import SwiftUI
 
 struct FamilyMemberNodeView: View {
-    let member: FamilyMember
-    
-    init(member: FamilyMember) {
-        self.member = member
-    }
+    let member: FamilyTreeNode
+    let isSelected: Bool
+    let action: () -> Void
     
     var body: some View {
-        VStack(spacing: 8) {
-            if let imageURL = member.profileImageURL {
-                AsyncImage(url: URL(string: imageURL)) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
-                    Image(systemName: "person.circle.fill")
-                        .resizable()
-                }
-                .frame(width: 60, height: 60)
-                .clipShape(Circle())
-            } else {
+        Button(action: action) {
+            VStack {
                 Image(systemName: "person.circle.fill")
                     .resizable()
-                    .frame(width: 60, height: 60)
-                    .foregroundColor(.blue)
+                    .frame(width: 40, height: 40)
+                    .foregroundColor(isSelected ? .blue : .gray)
+                
+                Text("\(member.firstName) \(member.lastName)")
+                    .font(.caption)
+                    .foregroundColor(isSelected ? .blue : .primary)
             }
-            
-            Text(member.displayName)
-                .font(.caption)
-                .multilineTextAlignment(.center)
         }
-        .padding()
-        .background(Color.white)
-        .cornerRadius(10)
-        .shadow(radius: 2)
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.systemBackground))
+                .shadow(radius: isSelected ? 5 : 2)
+        )
     }
-} 
+}

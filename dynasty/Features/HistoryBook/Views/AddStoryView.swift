@@ -4,7 +4,7 @@ import FirebaseAuth
 import FirebaseStorage
 import PhotosUI
 
-struct AppError: Identifiable {
+struct StoryError: Identifiable {
     let id = UUID()
     let message: String
 }
@@ -25,6 +25,9 @@ struct AddStoryView: View {
     
     var historyBookID: String
     var familyTreeID: String
+    
+    @State private var error: StoryError?
+    @State private var showError = false
     
     var body: some View {
         NavigationView {

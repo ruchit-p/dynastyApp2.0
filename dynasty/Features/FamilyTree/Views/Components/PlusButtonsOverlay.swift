@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PlusButtonsOverlay: View {
-    let selectedMember: FamilyMember
+    let selectedNode: FamilyTreeNode
     @Binding var showAddButtons: Bool
     @State private var showingAddFamilyMemberForm: Bool = false
     @State private var relationType: RelationType = .child
@@ -15,7 +15,12 @@ struct PlusButtonsOverlay: View {
                     Spacer()
                     ZStack {
                         // Circle representing the selected member
-                        FamilyMemberNodeView(member: selectedMember)
+                        FamilyMemberNodeView(
+                            member: selectedNode,
+                            isSelected: true
+                        ) {
+                            // No action needed here
+                        }
                         
                         // Top Plus Button for Parent
                         AddButton(
@@ -32,7 +37,7 @@ struct PlusButtonsOverlay: View {
                             buttonSize: 30,
                             backgroundColor: .blue
                         )
-                        .offset(x: 0, y: -60)
+                        .offset(y: -60)
                         
                         // Right Plus Button for Partner
                         AddButton(
@@ -49,7 +54,7 @@ struct PlusButtonsOverlay: View {
                             buttonSize: 30,
                             backgroundColor: .green
                         )
-                        .offset(x: 60, y: 0)
+                        .offset(x: 60)
                         
                         // Bottom Plus Button for Child
                         AddButton(
@@ -66,7 +71,7 @@ struct PlusButtonsOverlay: View {
                             buttonSize: 30,
                             backgroundColor: .orange
                         )
-                        .offset(x: 0, y: 60)
+                        .offset(y: 60)
                         
                         // Left Plus Button for Sibling
                         AddButton(
@@ -83,7 +88,7 @@ struct PlusButtonsOverlay: View {
                             buttonSize: 30,
                             backgroundColor: .purple
                         )
-                        .offset(x: -60, y: 0)
+                        .offset(x: -60)
                     }
                     Spacer()
                 }
@@ -98,7 +103,7 @@ struct PlusButtonsOverlay: View {
                 if let user = user {
                     AddFamilyMemberForm(
                         relationType: $relationType,
-                        selectedMember: selectedMember,
+                        selectedMember: FamilyMember(fromNode: selectedNode),
                         user: user
                     )
                 }

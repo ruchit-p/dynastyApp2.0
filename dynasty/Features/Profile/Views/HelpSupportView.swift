@@ -3,37 +3,41 @@ import FirebaseAuth
 import FirebaseFirestore
 
 @MainActor
-class HelpAndSupportViewModel: ObservableObject {
+class HelpSupportViewModel: ObservableObject {
     @Published var faqs: [FAQ] = []
     @Published var error: Error?
     @Published var isLoading = false
     @Published var isSubmitting = false
     
-    private let db = Firestore.firestore()
+    private let db = FirestoreManager.shared.getDB()
     
     func loadFAQs() async {
         isLoading = true
+        defer { isLoading = false }
         
         do {
             let snapshot = try await db.collection("faqs").getDocuments()
-            self.faqs = snapshot.documents.map { doc in
-                let data = doc.data()
-                return FAQ(
-                    id: doc.documentID,
-                    question: data["question"] as? String ?? "",
-                    answer: data["answer"] as? String ?? ""
-                )
+            await MainActor.run {
+                self.faqs = snapshot.documents.map { doc in
+                    let data = doc.data()
+                    return FAQ(
+                        id: doc.documentID,
+                        question: data["question"] as? String ?? "",
+                        answer: data["answer"] as? String ?? ""
+                    )
+                }
             }
         } catch {
-            self.error = error
+            await MainActor.run {
+                self.error = error
+            }
         }
-        
-        isLoading = false
     }
     
     func submitSupportRequest(name: String, email: String, message: String) async -> Bool {
         guard let userId = Auth.auth().currentUser?.uid else { return false }
         isSubmitting = true
+        defer { isSubmitting = false }
         
         do {
             try await db.collection("supportRequests").addDocument(data: [
@@ -44,24 +48,24 @@ class HelpAndSupportViewModel: ObservableObject {
                 "timestamp": FieldValue.serverTimestamp(),
                 "status": "pending"
             ])
-            isSubmitting = false
             return true
         } catch {
-            self.error = error
-            isSubmitting = false
+            await MainActor.run {
+                self.error = error
+            }
             return false
         }
     }
 }
 
-struct FAQ: Identifiable {
+struct FAQ: Identifiable, Codable {
     let id: String
     let question: String
     let answer: String
 }
 
 struct HelpAndSupportView: View {
-    @StateObject private var viewModel = HelpAndSupportViewModel()
+    @StateObject private var viewModel = HelpSupportViewModel()
     @State private var showingContactForm = false
     @State private var selectedFAQ: FAQ?
     
@@ -69,15 +73,10 @@ struct HelpAndSupportView: View {
         ScrollView {
             VStack(spacing: 24) {
                 if viewModel.isLoading {
-                    ProgressView()
-                        .padding()
+                    LoadingView(message: "Loading help resources...")
                 } else {
                     // Quick Actions
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Quick Actions")
-                            .font(.headline)
-                            .padding(.leading)
-                        
+                    SettingsSection(title: "Quick Actions") {
                         VStack(spacing: 8) {
                             Button(action: { showingContactForm = true }) {
                                 SettingRow(
@@ -116,16 +115,10 @@ struct HelpAndSupportView: View {
                             }
                         }
                     }
-                    .background(Color(.systemBackground))
-                    .cornerRadius(15)
                     
                     // Frequently Asked Questions
                     if !viewModel.faqs.isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Frequently Asked Questions")
-                                .font(.headline)
-                                .padding(.leading)
-                            
+                        SettingsSection(title: "Frequently Asked Questions") {
                             VStack(spacing: 8) {
                                 ForEach(viewModel.faqs) { faq in
                                     Button(action: { selectedFAQ = faq }) {
@@ -139,15 +132,15 @@ struct HelpAndSupportView: View {
                                 }
                             }
                         }
-                        .background(Color(.systemBackground))
-                        .cornerRadius(15)
                     }
                 }
                 
                 if let error = viewModel.error {
-                    Text(error.localizedDescription)
-                        .foregroundColor(.red)
-                        .padding()
+                    ErrorView(error: error, isPresented: .constant(true)) {
+                        Task {
+                            await viewModel.loadFAQs()
+                        }
+                    }
                 }
             }
             .padding()
@@ -168,7 +161,7 @@ struct HelpAndSupportView: View {
 }
 
 struct ContactSupportView: View {
-    @ObservedObject var viewModel: HelpAndSupportViewModel
+    @ObservedObject var viewModel: HelpSupportViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var email = ""
@@ -181,7 +174,9 @@ struct ContactSupportView: View {
             Form {
                 Section(header: Text("Your Information")) {
                     TextField("Name", text: $name)
+                        .textContentType(.name)
                     TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
                         .keyboardType(.emailAddress)
                         .autocapitalization(.none)
                 }
@@ -220,6 +215,7 @@ struct ContactSupportView: View {
             } message: {
                 Text(alertMessage)
             }
+            .disabled(viewModel.isSubmitting)
         }
     }
     
@@ -231,10 +227,12 @@ struct ContactSupportView: View {
                 message: message
             )
             
-            alertMessage = success
-                ? "Your support request has been submitted successfully."
-                : "Failed to submit support request. Please try again."
-            showAlert = true
+            await MainActor.run {
+                alertMessage = success
+                    ? "Your support request has been submitted successfully."
+                    : "Failed to submit support request. Please try again."
+                showAlert = true
+            }
         }
     }
 }

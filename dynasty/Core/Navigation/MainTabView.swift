@@ -38,6 +38,11 @@ struct MainTabView: View {
                    let userId = user.id,
                    let treeId = user.familyTreeID {
                     FamilyTreeView(treeId: treeId, userId: userId)
+                        .tabItem {
+                            Image(systemName: "person.2.fill")
+                            Text("Family Tree")
+                        }
+                        .tag(Tab.familyTree)
                 } else {
                     // Fallback view when user or treeId is not available
                     VStack {
@@ -47,13 +52,13 @@ struct MainTabView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
+                    .tabItem {
+                        Image(systemName: "person.2.fill")
+                        Text("Family Tree")
+                    }
+                    .tag(Tab.familyTree)
                 }
             }
-            .tabItem {
-                Image(systemName: "tree")
-                Text("Family Tree")
-            }
-            .tag(Tab.familyTree)
             
             VaultView()
                 .tabItem {
@@ -85,4 +90,4 @@ struct MainTabView: View {
             }
         }
     }
-} 
+}

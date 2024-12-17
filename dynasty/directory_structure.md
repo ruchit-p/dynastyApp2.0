@@ -18,6 +18,7 @@ dynasty/
 │   ├── Navigation/
 │   │   └── ContentView.swift
 │   └── Utils/
+│       └── FirestoreManager.swift
 │
 ├── Features/
 │   ├── Authentication/
@@ -27,6 +28,26 @@ dynasty/
 │   ├── Feed/
 │   ├── HistoryBook/
 │   ├── Profile/
+│   │   ├── Models/
+│   │   │   └── User.swift
+│   │   ├── Services/
+│   │   │   ├── AnalyticsService.swift
+│   │   │   ├── CacheService.swift
+│   │   │   ├── ErrorHandlingService.swift
+│   │   │   └── ValidationService.swift
+│   │   ├── ViewModels/
+│   │   │   ├── ProfileViewModel.swift
+│   │   │   ├── UserProfileEditViewModel.swift
+│   │   │   └── UserSettingsManager.swift
+│   │   └── Views/
+│   │       ├── Components/
+│   │       │   └── SettingsComponents.swift
+│   │       ├── AppearanceView.swift
+│   │       ├── HelpSupportView.swift
+│   │       ├── NotificationsView.swift
+│   │       ├── PrivacySecurityView.swift
+│   │       ├── UserProfileEditView.swift
+│   │       └── ProfileView.swift
 │   └── Vault/
 │       ├── Models/
 │       │   └── VaultItem.swift
@@ -37,11 +58,11 @@ dynasty/
 │       │   ├── VaultEncryptionService.swift
 │       │   └── ThumbnailService.swift
 │       └── Views/
-│           ├── VaultView.swift              # Main vault view with folder navigation
-│           ├── VaultContentView.swift       # Content grid view with folder support
-│           ├── VaultItemDetailView.swift    # Item detail view
-│           ├── VaultItemThumbnailView.swift # Thumbnail view for items and folders
-│           ├── TrashView.swift             # Trash management
+│           ├── VaultView.swift
+│           ├── VaultContentView.swift
+│           ├── VaultItemDetailView.swift
+│           ├── VaultItemThumbnailView.swift
+│           ├── TrashView.swift
 │           └── Components/
 │               ├── SearchFilterBar.swift
 │               ├── SelectionOverlay.swift
@@ -53,6 +74,10 @@ dynasty/
 ├── Resources/
 │   ├── Assets.xcassets/
 │   └── Info.plist
+│
+├── Config/
+│   ├── storage.rules
+│   └── GoogleService-Info.plist
 │
 └── Preview Content/
     └── Preview Assets.xcassets/

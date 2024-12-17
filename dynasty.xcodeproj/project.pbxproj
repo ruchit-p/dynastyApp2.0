@@ -14,6 +14,8 @@
 		C2B74CAB2CF14E9A0098A579 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = C2B74CAA2CF14E9A0098A579 /* FirebaseFunctions */; };
 		C2B74CAD2CF14E9A0098A579 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = C2B74CAC2CF14E9A0098A579 /* FirebaseStorage */; };
 		C2B74CAF2CF14E9A0098A579 /* FirebaseVertexAI in Frameworks */ = {isa = PBXBuildFile; productRef = C2B74CAE2CF14E9A0098A579 /* FirebaseVertexAI */; };
+		C2D3279E2D1218B0005F286C /* SDWebImage in Frameworks */ = {isa = PBXBuildFile; productRef = C2D3279D2D1218B0005F286C /* SDWebImage */; };
+		C2D327A02D1218B0005F286C /* SDWebImageMapKit in Frameworks */ = {isa = PBXBuildFile; productRef = C2D3279F2D1218B0005F286C /* SDWebImageMapKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -66,7 +68,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				C2B74CA32CF14E9A0098A579 /* FirebaseAnalytics in Frameworks */,
+				C2D327A02D1218B0005F286C /* SDWebImageMapKit in Frameworks */,
 				C2B74CA92CF14E9A0098A579 /* FirebaseFirestore in Frameworks */,
+				C2D3279E2D1218B0005F286C /* SDWebImage in Frameworks */,
 				C2B74CAB2CF14E9A0098A579 /* FirebaseFunctions in Frameworks */,
 				C2B74CA72CF14E9A0098A579 /* FirebaseCore in Frameworks */,
 				C2B74CAF2CF14E9A0098A579 /* FirebaseVertexAI in Frameworks */,
@@ -137,6 +141,8 @@
 				C2B74CAA2CF14E9A0098A579 /* FirebaseFunctions */,
 				C2B74CAC2CF14E9A0098A579 /* FirebaseStorage */,
 				C2B74CAE2CF14E9A0098A579 /* FirebaseVertexAI */,
+				C2D3279D2D1218B0005F286C /* SDWebImage */,
+				C2D3279F2D1218B0005F286C /* SDWebImageMapKit */,
 			);
 			productName = dynasty;
 			productReference = C2B74BEF2CF14B330098A579 /* dynasty.app */;
@@ -216,6 +222,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				C2B74CA12CF14E9A0098A579 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				C2D3279C2D1218B0005F286C /* XCRemoteSwiftPackageReference "SDWebImage" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C2B74BF02CF14B330098A579 /* Products */;
@@ -600,6 +607,14 @@
 				minimumVersion = 11.5.0;
 			};
 		};
+		C2D3279C2D1218B0005F286C /* XCRemoteSwiftPackageReference "SDWebImage" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/SDWebImage/SDWebImage.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.20.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -637,6 +652,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C2B74CA12CF14E9A0098A579 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseVertexAI;
+		};
+		C2D3279D2D1218B0005F286C /* SDWebImage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C2D3279C2D1218B0005F286C /* XCRemoteSwiftPackageReference "SDWebImage" */;
+			productName = SDWebImage;
+		};
+		C2D3279F2D1218B0005F286C /* SDWebImageMapKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C2D3279C2D1218B0005F286C /* XCRemoteSwiftPackageReference "SDWebImage" */;
+			productName = SDWebImageMapKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

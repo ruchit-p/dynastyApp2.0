@@ -6,8 +6,10 @@ class HistoryBookViewModel: ObservableObject {
     @Published var stories: [Story] = []
     @Published var isLoading = false
     @Published var error: Error?
+    @Published var isOffline = false
     
     private let db = FirestoreManager.shared.getDB()
+    private let cache = HistoryBookCacheService.shared
     
     @MainActor
     private func setLoading(_ value: Bool) {
@@ -24,33 +26,41 @@ class HistoryBookViewModel: ObservableObject {
         defer { Task { @MainActor in self.isLoading = false } }
         
         do {
-            // Fetch public stories
+            // Try to fetch from network first
             let publicSnapshot = try await db.collection("stories")
                 .whereField("familyTreeID", isEqualTo: familyTreeID)
                 .whereField("privacy", isEqualTo: "public")
                 .getDocuments()
             
-            // Fetch user's private stories
             let privateSnapshot = try await db.collection("stories")
                 .whereField("creatorUserID", isEqualTo: currentUserId)
                 .whereField("privacy", isEqualTo: "private")
                 .getDocuments()
             
             var allStories: [Story] = []
-            
-            // Add public stories
             allStories.append(contentsOf: publicSnapshot.documents.compactMap { try? $0.data(as: Story.self) })
-            
-            // Add private stories
             allStories.append(contentsOf: privateSnapshot.documents.compactMap { try? $0.data(as: Story.self) })
             
-            // Sort combined results by creation date
+            // Sort combined results
             let sortedStories = allStories.sorted(by: { ($0.createdAt ?? Date()) > ($1.createdAt ?? Date()) })
+            
+            // Cache the fetched stories
+            try cache.cacheStories(sortedStories, forHistoryBook: familyTreeID)
+            
             await MainActor.run {
                 self.stories = sortedStories
+                self.isOffline = false
             }
         } catch {
-            await setError(error)
+            // If network fetch fails, try to load from cache
+            if let cachedStories = cache.getCachedStories(forHistoryBook: familyTreeID) {
+                await MainActor.run {
+                    self.stories = cachedStories
+                    self.isOffline = true
+                }
+            } else {
+                await setError(error)
+            }
         }
     }
     
@@ -61,9 +71,28 @@ class HistoryBookViewModel: ObservableObject {
         do {
             let docRef = db.collection("stories").document()
             try await docRef.setData(from: story)
+            
+            // Update local cache
+            var cachedStories = cache.getCachedStories(forHistoryBook: story.familyTreeID) ?? []
+            cachedStories.insert(story, at: 0)
+            try cache.cacheStories(cachedStories, forHistoryBook: story.familyTreeID)
+            
+            await MainActor.run {
+                self.stories.insert(story, at: 0)
+            }
         } catch {
-            await setError(error)
-            throw error
+            // If offline, mark for sync later
+            try cache.markForSync(story)
+            
+            // Update local cache and UI
+            var cachedStories = cache.getCachedStories(forHistoryBook: story.familyTreeID) ?? []
+            cachedStories.insert(story, at: 0)
+            try cache.cacheStories(cachedStories, forHistoryBook: story.familyTreeID)
+            
+            await MainActor.run {
+                self.stories.insert(story, at: 0)
+                self.isOffline = true
+            }
         }
     }
     
@@ -77,9 +106,38 @@ class HistoryBookViewModel: ObservableObject {
         
         do {
             try await db.collection("stories").document(storyId).setData(from: story)
+            
+            // Update local cache
+            if var cachedStories = cache.getCachedStories(forHistoryBook: story.familyTreeID) {
+                if let index = cachedStories.firstIndex(where: { $0.id == story.id }) {
+                    cachedStories[index] = story
+                    try cache.cacheStories(cachedStories, forHistoryBook: story.familyTreeID)
+                }
+            }
+            
+            await MainActor.run {
+                if let index = self.stories.firstIndex(where: { $0.id == story.id }) {
+                    self.stories[index] = story
+                }
+            }
         } catch {
-            await setError(error)
-            throw error
+            // If offline, mark for sync later
+            try cache.markForSync(story)
+            
+            // Update local cache and UI
+            if var cachedStories = cache.getCachedStories(forHistoryBook: story.familyTreeID) {
+                if let index = cachedStories.firstIndex(where: { $0.id == story.id }) {
+                    cachedStories[index] = story
+                    try cache.cacheStories(cachedStories, forHistoryBook: story.familyTreeID)
+                }
+            }
+            
+            await MainActor.run {
+                if let index = self.stories.firstIndex(where: { $0.id == story.id }) {
+                    self.stories[index] = story
+                }
+                self.isOffline = true
+            }
         }
     }
     
@@ -89,9 +147,44 @@ class HistoryBookViewModel: ObservableObject {
         
         do {
             try await db.collection("stories").document(storyId).delete()
+            
+            // Update local cache
+            if let story = stories.first(where: { $0.id == storyId }),
+               var cachedStories = cache.getCachedStories(forHistoryBook: story.familyTreeID) {
+                cachedStories.removeAll { $0.id == storyId }
+                try cache.cacheStories(cachedStories, forHistoryBook: story.familyTreeID)
+            }
+            
+            await MainActor.run {
+                self.stories.removeAll { $0.id == storyId }
+            }
         } catch {
             await setError(error)
-            throw error
+        }
+    }
+    
+    // MARK: - Background Sync
+    
+    func syncPendingChanges() async {
+        let pendingStories = cache.getPendingSyncItems()
+        
+        for story in pendingStories {
+            do {
+                if let id = story.id {
+                    try await db.collection("stories").document(id).setData(from: story)
+                } else {
+                    let docRef = db.collection("stories").document()
+                    try await docRef.setData(from: story)
+                }
+            } catch {
+                print("Failed to sync story: \(error.localizedDescription)")
+                continue
+            }
+        }
+        
+        cache.clearPendingSyncItems()
+        await MainActor.run {
+            self.isOffline = false
         }
     }
 } 

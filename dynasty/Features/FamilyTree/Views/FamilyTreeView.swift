@@ -1,131 +1,126 @@
 import SwiftUI
-import Firebase
+import FirebaseFirestore
 
 struct FamilyTreeView: View {
     @StateObject private var viewModel: FamilyTreeViewModel
-    @State private var scale: CGFloat = 1.0
-    @State private var offset: CGSize = .zero
     @State private var showingAddMemberSheet = false
-    @State private var showingMemberDetails = false
     @State private var selectedMember: FamilyTreeNode?
-    @State private var showError = false
     
     init(treeId: String, userId: String) {
         _viewModel = StateObject(wrappedValue: FamilyTreeViewModel(treeId: treeId, userId: userId))
     }
     
     var body: some View {
-        ZStack {
-            // Background
-            Color(.systemBackground)
-                .ignoresSafeArea()
-            
-            // Tree Content
-            ScrollView([.horizontal, .vertical], showsIndicators: false) {
-                ZStack {
-                    // Tree Canvas
-                    FamilyTreeCanvas(viewModel: viewModel)
-                        .scaleEffect(scale)
-                        .offset(offset)
-                        .gesture(
-                            MagnificationGesture()
-                                .onChanged { value in
-                                    scale = value.magnitude
-                                }
-                        )
-                        .gesture(
-                            DragGesture()
-                                .onChanged { value in
-                                    offset = CGSize(
-                                        width: value.translation.width + offset.width,
-                                        height: value.translation.height + offset.height
-                                    )
-                                }
-                        )
-                    
-                    // Loading Indicator
-                    if viewModel.isLoading {
-                        ProgressView()
-                    }
-                }
-            }
-            
-            // Toolbar Overlay
-            VStack {
-                HStack {
-                    // Edit Mode Toggle
-                    Button(action: {
-                        viewModel.isEditMode.toggle()
-                    }) {
-                        Image(systemName: viewModel.isEditMode ? "pencil.circle.fill" : "pencil.circle")
-                            .font(.title2)
-                    }
-                    
-                    Spacer()
-                    
-                    // Add Member Button (only visible in edit mode)
-                    if viewModel.isEditMode {
-                        Button(action: {
-                            showingAddMemberSheet = true
-                        }) {
-                            Image(systemName: "person.badge.plus")
-                                .font(.title2)
-                        }
-                    }
-                    
-                    // Reset View Button
-                    Button(action: {
-                        withAnimation {
-                            scale = 1.0
-                            offset = .zero
-                        }
-                    }) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.title2)
-                    }
-                }
-                .padding()
-                .background(Color(.systemBackground).opacity(0.8))
-                .cornerRadius(15)
-                .padding()
+        GeometryReader { geometry in
+            ZStack {
+                // Background
+                Color(.systemBackground)
+                    .ignoresSafeArea()
                 
-                Spacer()
+                // Tree Content
+                if viewModel.isLoading {
+                    ProgressView("Loading family tree...")
+                } else if viewModel.nodes.isEmpty {
+                    // Show only the user's node if no family members exist
+                    if let currentUser = viewModel.getCurrentUserNode() {
+                        FamilyMemberNodeView(
+                            member: currentUser,
+                            isSelected: selectedMember?.id == currentUser.id
+                        ) {
+                            selectedMember = currentUser
+                        }
+                        .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                    }
+                } else {
+                    // Draw connection lines between related members
+                    ForEach(Array(viewModel.nodes.values)) { node in
+                        ForEach(node.parentIds, id: \.self) { parentId in
+                            if let parent = viewModel.nodes[parentId] {
+                                ConnectionLine(
+                                    start: nodePosition(for: parent, in: geometry.size),
+                                    end: nodePosition(for: node, in: geometry.size),
+                                    type: .parent
+                                )
+                            }
+                        }
+                        
+                        ForEach(node.spouseIds, id: \.self) { spouseId in
+                            if let spouse = viewModel.nodes[spouseId] {
+                                ConnectionLine(
+                                    start: nodePosition(for: node, in: geometry.size),
+                                    end: nodePosition(for: spouse, in: geometry.size),
+                                    type: .spouse
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Draw member nodes
+                    ForEach(Array(viewModel.nodes.values)) { node in
+                        FamilyMemberNodeView(
+                            member: node,
+                            isSelected: selectedMember?.id == node.id
+                        ) {
+                            selectedMember = node
+                        }
+                        .position(nodePosition(for: node, in: geometry.size))
+                    }
+                }
+                
+                // Add Member Button
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button(action: { showingAddMemberSheet = true }) {
+                            Image(systemName: "plus.circle.fill")
+                                .resizable()
+                                .frame(width: 60, height: 60)
+                                .foregroundColor(.blue)
+                                .background(Color.white)
+                                .clipShape(Circle())
+                                .shadow(radius: 4)
+                        }
+                        .padding()
+                    }
+                }
             }
         }
         .sheet(isPresented: $showingAddMemberSheet) {
             AddMemberView(viewModel: viewModel)
         }
-        .sheet(item: $selectedMember) { member in
-            MemberDetailsView(member: member, viewModel: viewModel)
-        }
-        .errorOverlay(error: viewModel.error, isPresented: $showError) {
+        .onAppear {
             Task {
                 do {
                     try await viewModel.loadTreeData()
                 } catch {
-                    print("Error reloading tree data: \(error.localizedDescription)")
-                    // Update the viewModel error to show the new error message
-                    await MainActor.run {
-                        viewModel.error = error
-                    }
+                    print("Error loading tree data: \(error.localizedDescription)")
                 }
             }
         }
-        .onChange(of: viewModel.error?.localizedDescription ?? "") { oldValue, newValue in
-            showError = !newValue.isEmpty
-        }
     }
-}
-
-// MARK: - Supporting Views
-
-struct FamilyTreeCanvas: View {
-    @ObservedObject var viewModel: FamilyTreeViewModel
     
-    var body: some View {
-        // This is a placeholder for the actual tree rendering
-        // We'll implement the tree layout algorithm in the next step
-        Text("Tree Canvas - Coming Soon")
+    private func nodePosition(for node: FamilyTreeNode, in size: CGSize) -> CGPoint {
+        // Calculate position based on relationships
+        let centerX = size.width / 2
+        let centerY = size.height / 2
+        
+        if node.isRoot {
+            return CGPoint(x: centerX, y: centerY)
+        }
+        
+        // Position based on generation and siblings
+        let generationSpacing: CGFloat = 100
+        let siblingSpacing: CGFloat = 150
+        
+        let generation = node.generation
+        let siblingIndex = viewModel.nodes.values.filter { $0.generation == generation }.firstIndex(of: node) ?? 0
+        let siblingsInGeneration = viewModel.nodes.values.filter { $0.generation == generation }.count
+        
+        let x = centerX + (CGFloat(siblingIndex) - CGFloat(siblingsInGeneration - 1) / 2) * siblingSpacing
+        let y = centerY + CGFloat(generation) * generationSpacing
+        
+        return CGPoint(x: x, y: y)
     }
 }
 
@@ -206,73 +201,11 @@ struct AddMemberView: View {
     }
 }
 
-struct MemberDetailsView: View {
-    let member: FamilyTreeNode
-    @ObservedObject var viewModel: FamilyTreeViewModel
-    @Environment(\.dismiss) private var dismiss
-    
-    var body: some View {
-        NavigationView {
-            List {
-                Section(header: Text("Personal Information")) {
-                    LabeledContent("Name", value: member.fullName)
-                    if let dob = member.dateOfBirth {
-                        LabeledContent("Date of Birth", value: dob.formatted(date: .long, time: .omitted))
-                    }
-                    LabeledContent("Gender", value: member.gender.rawValue.capitalized)
-                }
-                
-                Section(header: Text("Contact Information")) {
-                    if let email = member.email {
-                        LabeledContent("Email", value: email)
-                    }
-                    if let phone = member.phoneNumber {
-                        LabeledContent("Phone", value: phone)
-                    }
-                }
-                
-                Section(header: Text("Family Connections")) {
-                    NavigationLink("Parents (\(viewModel.getParents(member.id).count))") {
-                        RelativesList(relatives: viewModel.getParents(member.id), relationshipType: "Parent")
-                    }
-                    
-                    NavigationLink("Spouses (\(viewModel.getSpouses(member.id).count))") {
-                        RelativesList(relatives: viewModel.getSpouses(member.id), relationshipType: "Spouse")
-                    }
-                    
-                    NavigationLink("Children (\(viewModel.getChildren(member.id).count))") {
-                        RelativesList(relatives: viewModel.getChildren(member.id), relationshipType: "Child")
-                    }
-                }
-            }
-            .navigationTitle("Member Details")
-            .navigationBarItems(trailing: Button("Done") {
-                dismiss()
-            })
-        }
-    }
-}
-
-struct RelativesList: View {
-    let relatives: [FamilyTreeNode]
-    let relationshipType: String
-    
-    var body: some View {
-        List(relatives) { relative in
-            VStack(alignment: .leading) {
-                Text(relative.fullName)
-                    .font(.headline)
-                if let dob = relative.dateOfBirth {
-                    Text(dob.formatted(date: .long, time: .omitted))
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .navigationTitle(relationshipType + "s")
-    }
+enum RelationshipType: String {
+    case parent
+    case spouse
 }
 
 #Preview {
-    FamilyTreeView(treeId: "preview", userId: "preview")
+    FamilyTreeView(treeId: "previewTree", userId: "previewUser")
 }

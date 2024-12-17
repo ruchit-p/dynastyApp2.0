@@ -7,7 +7,8 @@ struct HistoryBookView: View {
     @State private var historyBook: HistoryBook?
     @State private var showAddStoryView = false
     @State private var user: User?
-
+    @Environment(\.scenePhase) private var scenePhase
+    
     var body: some View {
         NavigationView {
             ScrollView {
@@ -25,14 +26,40 @@ struct HistoryBookView: View {
                     .padding(.horizontal)
                     .padding(.top, 20)
                     
+                    // Offline indicator
+                    if viewModel.isOffline {
+                        HStack {
+                            Image(systemName: "wifi.slash")
+                            Text("Offline Mode")
+                            Spacer()
+                            Button("Sync") {
+                                Task {
+                                    await viewModel.syncPendingChanges()
+                                    await fetchHistoryBook()
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color.yellow.opacity(0.2))
+                        .cornerRadius(8)
+                        .padding(.horizontal)
+                    }
+                    
                     if viewModel.isLoading {
                         ProgressView("Loading stories...")
                             .padding()
                     } else if let error = viewModel.error {
-                        Text(error.localizedDescription)
-                            .font(.headline)
-                            .foregroundColor(.red)
-                            .padding()
+                        VStack {
+                            Text(error.localizedDescription)
+                                .font(.headline)
+                                .foregroundColor(.red)
+                                .padding()
+                            
+                            Button("Try Again") {
+                                fetchHistoryBook()
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     } else if viewModel.stories.isEmpty {
                         Text("Add your first story by clicking the add button!")
                             .font(.headline)
@@ -93,6 +120,15 @@ struct HistoryBookView: View {
                             guard let currentUser = Auth.auth().currentUser else { return }
                             await viewModel.fetchStories(familyTreeID: historyBookID, currentUserId: currentUser.uid)
                         }
+                    }
+                }
+            }
+            .onChange(of: scenePhase) { oldPhase, newPhase in
+                if newPhase == .active {
+                    // Try to sync when app becomes active
+                    Task {
+                        await viewModel.syncPendingChanges()
+                        await fetchHistoryBook()
                     }
                 }
             }

@@ -1,7 +1,7 @@
 import Foundation
 import FirebaseFirestore
 
-struct FamilyTreeNode: Identifiable, Codable {
+struct FamilyTreeNode: Identifiable, Codable, Equatable {
     let id: String
     var firstName: String
     var lastName: String
@@ -24,6 +24,20 @@ struct FamilyTreeNode: Identifiable, Codable {
         case unknown
     }
     
+    var isRoot: Bool {
+        parentIds.isEmpty
+    }
+    
+    var generation: Int {
+        if parentIds.isEmpty {
+            return 0
+        } else {
+            // Note: This is a simplified version. In reality, you'd want to calculate this
+            // based on the actual tree structure in the ViewModel
+            return 1
+        }
+    }
+    
     var fullName: String {
         "\(firstName) \(lastName)"
     }
@@ -41,6 +55,10 @@ struct FamilyTreeNode: Identifiable, Codable {
     // Computed property to check if node has children
     var hasChildren: Bool {
         !childrenIds.isEmpty
+    }
+    
+    static func == (lhs: FamilyTreeNode, rhs: FamilyTreeNode) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
