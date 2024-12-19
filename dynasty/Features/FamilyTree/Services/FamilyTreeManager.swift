@@ -1,16 +1,21 @@
 import FirebaseFirestore
 import FirebaseAuth
+import OSLog
 
-class FamilyTreeManager {
+actor FamilyTreeManager {
     static let shared = FamilyTreeManager()
     private let db = FirestoreManager.shared.getDB()
+    private let logger = Logger(subsystem: "com.dynasty.FamilyTreeManager", category: "FamilyTree")
     
     private init() {}
     
-    func createFamilyTree(completion: @escaping (Result<String, Error>) -> Void) {
+    // MARK: - Family Tree Operations
+    
+    /// Creates a new family tree for the current user
+    /// - Returns: The ID of the newly created family tree
+    func createFamilyTree() async throws -> String {
         guard let currentUser = Auth.auth().currentUser else {
-            completion(.failure(NSError(domain: "FamilyTreeManager", code: 0, userInfo: [NSLocalizedDescriptionKey: "No authenticated user"])))
-            return
+            throw AuthError.notAuthenticated
         }
         
         let familyTreeId = db.collection(Constants.Firebase.familyTreesCollection).document().documentID
@@ -25,199 +30,165 @@ class FamilyTreeManager {
             "members": [currentUser.uid]
         ]
         
-        db.collection(Constants.Firebase.familyTreesCollection).document(familyTreeId).setData(familyTreeData) { error in
-            if let error = error {
-                completion(.failure(error))
-            } else {
-                // Update the user's document with the new family tree ID
-                self.db.collection(Constants.Firebase.usersCollection).document(currentUser.uid).updateData([
-                    "familyTreeID": familyTreeId,
-                    "updatedAt": FieldValue.serverTimestamp()
-                ]) { error in
-                    if let error = error {
-                        completion(.failure(error))
-                    } else {
-                        completion(.success(familyTreeId))
-                    }
-                }
-            }
-        }
-    }
-    
-    func addMemberToFamilyTree(familyTreeId: String, member: FamilyMember, completion: @escaping (Result<Void, Error>) -> Void) {
-        let membersRef = db.collection(Constants.Firebase.familyTreesCollection)
+        try await db.collection(Constants.Firebase.familyTreesCollection)
             .document(familyTreeId)
-            .collection("members")
+            .setData(familyTreeData)
         
-        do {
-            let _ = try membersRef.addDocument(from: member) { error in
-                if let error = error {
-                    completion(.failure(error))
-                } else {
-                    completion(.success(()))
-                }
-            }
-        } catch {
-            completion(.failure(error))
+        // Update the user's document with the new family tree ID
+        try await db.collection(Constants.Firebase.usersCollection)
+            .document(currentUser.uid)
+            .updateData([
+                "familyTreeID": familyTreeId,
+                "isOwner": true,
+                "isAdmin": true,
+                "canAddMembers": true,
+                "canEdit": true,
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+        
+        logger.info("Created new family tree with ID: \(familyTreeId)")
+        return familyTreeId
+    }
+    
+    /// Fetches all members of a family tree
+    /// - Parameter familyTreeId: The ID of the family tree to fetch members from
+    /// - Returns: An array of User objects representing the family tree members
+    func fetchFamilyTreeMembers(familyTreeId: String) async throws -> [User] {
+        let snapshot = try await db.collection(Constants.Firebase.usersCollection)
+            .whereField("familyTreeID", isEqualTo: familyTreeId)
+            .getDocuments()
+        
+        return try snapshot.documents.compactMap { document in
+            try document.data(as: User.self)
         }
     }
     
-    func fetchFamilyTree(id: String, completion: @escaping (Result<FamilyTree, Error>) -> Void) {
-        db.collection(Constants.Firebase.familyTreesCollection).document(id).getDocument { document, error in
-            if let error = error {
-                DispatchQueue.main.async {
-                    completion(.failure(error))
-                }
-                return
-            }
-            
-            if let document = document, document.exists {
-                do {
-                    var familyTree = try document.data(as: FamilyTree.self)
-                    familyTree.id = document.documentID
-                    DispatchQueue.main.async {
-                        completion(.success(familyTree))
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        completion(.failure(error))
-                    }
-                }
-            } else {
-                DispatchQueue.main.async {
-                    completion(.failure(NSError(domain: "FamilyTreeManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Family tree not found"])))
-                }
-            }
-        }
-    }
-    
-    func updateFamilyTreeMember(_ member: FamilyMember, in familyTreeId: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let memberId = member.id else {
-            completion(.failure(NSError(domain: "FamilyTreeManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid member ID"])))
-            return
+    /// Adds a new member to the family tree
+    /// - Parameters:
+    ///   - email: Email of the new member
+    ///   - familyTreeId: ID of the family tree to add the member to
+    ///   - relationship: Relationship to the current user
+    func addMember(email: String, to familyTreeId: String, relationship: String) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw AuthError.notAuthenticated
         }
         
-        let memberRef = db.collection(Constants.Firebase.familyTreesCollection).document(familyTreeId)
-            .collection("members").document(memberId)
-        
-        do {
-            var memberData = try member.asDictionary()
-            memberData["updatedAt"] = FieldValue.serverTimestamp()
-            
-            memberRef.updateData(memberData) { error in
-                if let error = error {
-                    completion(.failure(error))
-                } else {
-                    completion(.success(()))
-                }
-            }
-        } catch {
-            completion(.failure(error))
-        }
-    }
-    
-    func removeMember(memberId: String, from familyTreeId: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        let batch = db.batch()
-        
-        // Remove member document
-        let memberRef = db.collection(Constants.Firebase.familyTreesCollection).document(familyTreeId)
-            .collection("members").document(memberId)
-        batch.deleteDocument(memberRef)
-        
-        // Remove relationships
-        let relationshipsRef = db.collection(Constants.Firebase.familyTreesCollection).document(familyTreeId)
-            .collection("relationships")
-        
-        relationshipsRef.whereFilter(Filter.orFilter([
-            Filter.whereField("fromMemberID", isEqualTo: memberId),
-            Filter.whereField("toMemberID", isEqualTo: memberId)
-        ])).getDocuments { snapshot, error in
-            if let error = error {
-                completion(.failure(error))
-                return
-            }
-            
-            snapshot?.documents.forEach { doc in
-                batch.deleteDocument(doc.reference)
-            }
-            
-            batch.commit { error in
-                if let error = error {
-                    completion(.failure(error))
-                } else {
-                    completion(.success(()))
-                }
-            }
-        }
-    }
-    
-    func addRelationship(fromMember: FamilyMember,
-                        toMember: FamilyMember,
-                        type: RelationType,
-                        familyTreeId: String) async throws {
-        let db = FirestoreManager.shared.getDB()
-        let batch = db.batch()
-        
-        // Create primary relationship
-        let relationshipRef = db.collection(Constants.Firebase.familyTreesCollection)
-            .document(familyTreeId)
-            .collection("relationships")
-            .document()
-            
-        let relationship = Relationship(
-            fromMemberID: fromMember.id ?? "",
-            toMemberID: toMember.id ?? "",
-            type: type
+        // Create new user document
+        let newUserId = db.collection(Constants.Firebase.usersCollection).document().documentID
+        let newUser = User(
+            email: email,
+            familyTreeID: familyTreeId,
+            canAddMembers: false,
+            canEdit: true
         )
         
-        try batch.setData(from: relationship, forDocument: relationshipRef)
+        try await db.collection(Constants.Firebase.usersCollection)
+            .document(newUserId)
+            .setData(from: newUser)
         
-        // Create reciprocal relationship if needed
-        if type.requiresReciprocal {
-            let reciprocalRef = db.collection(Constants.Firebase.familyTreesCollection)
-                .document(familyTreeId)
-                .collection("relationships")
-                .document()
-            
-            let reciprocalRelationship = Relationship(
-                fromMemberID: toMember.id ?? "",
-                toMemberID: fromMember.id ?? "",
-                type: type.reciprocalType
-            )
-            
-            try batch.setData(from: reciprocalRelationship, forDocument: reciprocalRef)
+        // Update family tree document
+        try await db.collection(Constants.Firebase.familyTreesCollection)
+            .document(familyTreeId)
+            .updateData([
+                "members": FieldValue.arrayUnion([newUserId]),
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+        
+        // Update relationships based on the relationship type
+        var updates: [String: Any] = [:]
+        switch relationship.lowercased() {
+        case "parent":
+            updates["parentIds"] = FieldValue.arrayUnion([newUserId])
+        case "child":
+            updates["childIds"] = FieldValue.arrayUnion([newUserId])
+        case "spouse":
+            updates["spouseId"] = newUserId
+        case "sibling":
+            updates["siblingIds"] = FieldValue.arrayUnion([newUserId])
+        default:
+            logger.warning("Unknown relationship type: \(relationship)")
         }
         
-        try await batch.commit()
+        if !updates.isEmpty {
+            try await db.collection(Constants.Firebase.usersCollection)
+                .document(currentUser.uid)
+                .updateData(updates)
+        }
+        
+        logger.info("Added new member with ID: \(newUserId) to family tree: \(familyTreeId)")
     }
     
-    func fetchRelationships(familyTreeId: String, completion: @escaping (Result<[Relationship], Error>) -> Void) {
-        let relationshipsRef = db.collection(Constants.Firebase.familyTreesCollection)
-            .document(familyTreeId)
-            .collection("relationships")
+    /// Updates a member's information in the family tree
+    /// - Parameters:
+    ///   - user: The updated user information
+    ///   - familyTreeId: The ID of the family tree
+    func updateMember(_ user: User, in familyTreeId: String) async throws {
+        guard let userId = user.id else {
+            throw FamilyTreeError.invalidUserId
+        }
         
-        relationshipsRef.getDocuments { snapshot, error in
-            if let error = error {
-                DispatchQueue.main.async {
-                    completion(.failure(error))
-                }
-                return
-            }
-            
-            guard let documents = snapshot?.documents else {
-                completion(.success([]))
-                return
-            }
-            
-            let relationships = documents.compactMap { doc -> Relationship? in
-                var relationship = try? doc.data(as: Relationship.self)
-                relationship?.id = doc.documentID
-                return relationship
-            }
-            
-            DispatchQueue.main.async {
-                completion(.success(relationships))
+        try await db.collection(Constants.Firebase.usersCollection)
+            .document(userId)
+            .setData(from: user, merge: true)
+        
+        logger.info("Updated member with ID: \(userId) in family tree: \(familyTreeId)")
+    }
+    
+    /// Removes a member from the family tree
+    /// - Parameters:
+    ///   - userId: The ID of the user to remove
+    ///   - familyTreeId: The ID of the family tree
+    func removeMember(_ userId: String, from familyTreeId: String) async throws {
+        let batch = db.batch()
+        
+        // Remove user's family tree reference
+        let userRef = db.collection(Constants.Firebase.usersCollection).document(userId)
+        batch.updateData([
+            "familyTreeID": FieldValue.delete(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ], forDocument: userRef)
+        
+        // Remove from family tree members array
+        let treeRef = db.collection(Constants.Firebase.familyTreesCollection).document(familyTreeId)
+        batch.updateData([
+            "members": FieldValue.arrayRemove([userId]),
+            "updatedAt": FieldValue.serverTimestamp()
+        ], forDocument: treeRef)
+        
+        try await batch.commit()
+        logger.info("Removed member with ID: \(userId) from family tree: \(familyTreeId)")
+    }
+    
+    // MARK: - Error Types
+    
+    enum AuthError: LocalizedError {
+        case notAuthenticated
+        
+        var errorDescription: String? {
+            switch self {
+            case .notAuthenticated:
+                return "No authenticated user found"
             }
         }
     }
-} 
+    
+    enum FamilyTreeError: LocalizedError {
+        case invalidUserId
+        case invalidFamilyTreeId
+        case memberNotFound
+        case permissionDenied
+        
+        var errorDescription: String? {
+            switch self {
+            case .invalidUserId:
+                return "Invalid user ID"
+            case .invalidFamilyTreeId:
+                return "Invalid family tree ID"
+            case .memberNotFound:
+                return "Member not found in family tree"
+            case .permissionDenied:
+                return "You don't have permission to perform this action"
+            }
+        }
+    }
+}

@@ -13,29 +13,47 @@ struct FamilyTreeNode: Identifiable, Codable, Equatable {
     var parentIds: [String]
     var spouseIds: [String]
     var childrenIds: [String]
+    var generation: Int
     var isRegisteredUser: Bool
     var canEdit: Bool
     var updatedAt: Timestamp
     
-    enum Gender: String, Codable {
-        case male
-        case female
-        case other
-        case unknown
+    init(
+        id: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: Date? = nil,
+        gender: Gender,
+        email: String?,
+        phoneNumber: String?,
+        photoURL: String?,
+        parentIds: [String],
+        childrenIds: [String],
+        spouseIds: [String],
+        generation: Int,
+        isRegisteredUser: Bool,
+        canEdit: Bool,
+        updatedAt: Timestamp
+    ) {
+        self.id = id
+        self.firstName = firstName
+        self.lastName = lastName
+        self.dateOfBirth = dateOfBirth
+        self.gender = gender
+        self.email = email
+        self.phoneNumber = phoneNumber
+        self.photoURL = photoURL
+        self.parentIds = parentIds
+        self.childrenIds = childrenIds
+        self.spouseIds = spouseIds
+        self.generation = generation
+        self.isRegisteredUser = isRegisteredUser
+        self.canEdit = canEdit
+        self.updatedAt = updatedAt
     }
     
     var isRoot: Bool {
         parentIds.isEmpty
-    }
-    
-    var generation: Int {
-        if parentIds.isEmpty {
-            return 0
-        } else {
-            // Note: This is a simplified version. In reality, you'd want to calculate this
-            // based on the actual tree structure in the ViewModel
-            return 1
-        }
     }
     
     var fullName: String {
@@ -77,6 +95,7 @@ extension FamilyTreeNode {
             parentIds: [],
             spouseIds: [],
             childrenIds: [],
+            generation: 0,
             isRegisteredUser: true,
             canEdit: true,
             updatedAt: Timestamp()

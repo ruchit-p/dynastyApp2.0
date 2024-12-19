@@ -70,6 +70,9 @@ class UserProfileEditViewModel: ObservableObject {
     /// The current profile image URL for display
     @Published var profileImageURL: URL?
     
+    /// The current profile image
+    @Published var profileImage: UIImage?
+    
     // MARK: - Dependencies
     private let db = FirestoreManager.shared.getDB()
     private let storage = Storage.storage()
@@ -220,11 +223,9 @@ class UserProfileEditViewModel: ObservableObject {
     
     // MARK: - Image Handling
     
-    /// Uploads a profile image to Firebase Storage
-    /// - Parameters:
-    ///   - image: UIImage to upload
-    /// - Returns: Download URL string of the uploaded image
-    /// - Throws: ProfileError if upload fails
+    /// Uploads and processes a new profile image
+    /// - Parameter image: The UIImage to upload
+    /// - Returns: The download URL of the uploaded image
     func uploadProfileImage(image: UIImage) async throws -> String {
         let startTime = Date()
         isLoading = true
@@ -232,34 +233,39 @@ class UserProfileEditViewModel: ObservableObject {
         isUploading = true
         
         defer {
-            Task { @MainActor in
-                self.isUploading = false
-                self.uploadProgress = 0
-            }
-            let duration = Date().timeIntervalSince(startTime)
-            analytics.logOperationTime(operation: "profile_image_upload", duration: duration)
+            isLoading = false
+            isUploading = false
         }
         
+        // Check authentication state
+        guard let currentUser = Auth.auth().currentUser else {
+            self.logger.error("Authentication error: No user is currently signed in")
+            throw ProfileError.unauthorized
+        }
+        
+        // Log authentication state
+        self.logger.info("""
+        Authentication State:
+        - User ID: \(currentUser.uid)
+        - Email: \(currentUser.email ?? "Not available")
+        - Email Verified: \(currentUser.isEmailVerified)
+        - Provider ID: \(currentUser.providerID)
+        - Token Valid: \(!(currentUser.refreshToken?.isEmpty ?? true))
+        """)
+        
+        // Proceed with upload using verified user ID
+        let userId = currentUser.uid
+        
         do {
-            // Get current user ID
-            guard let userId = Auth.auth().currentUser?.uid else {
-                throw ProfileError.invalidUser
-            }
+            // Compress image first
+            let imageData = try compressImage(image, maxSizeKB: 5120)
             
-            // Compress image
-            let imageData = try compressImage(image)
+            // Setup storage reference
+            let storageRef = storage.reference()
+            let photoRef = storageRef.child("profile_images/\(userId)_\(Date().timeIntervalSince1970).jpg")
             
-            // Create a unique filename
-            let filename = "\(UUID().uuidString).jpg"
-            let path = "profile_images/\(userId)/\(filename)"
-            
-            // Create storage reference
-            let photoRef = storage.reference(withPath: path)
-            
-            // Set metadata with caching
             let metadata = StorageMetadata()
             metadata.contentType = "image/jpeg"
-            metadata.cacheControl = "public, max-age=31536000" // Cache for 1 year
             
             // Create a promise to handle upload completion
             return try await withCheckedThrowingContinuation { continuation in
@@ -267,138 +273,170 @@ class UserProfileEditViewModel: ObservableObject {
                 
                 // Monitor progress
                 uploadTask.observe(.progress) { [weak self] snapshot in
-                    guard let progress = snapshot.progress else { return }
-                    let percentage = Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
+                    guard let self = self else { return }
+                    let percentComplete = Double(snapshot.progress?.completedUnitCount ?? 0) / Double(snapshot.progress?.totalUnitCount ?? 1)
                     Task { @MainActor in
-                        self?.uploadProgress = percentage
+                        self.uploadProgress = percentComplete
                     }
                 }
                 
                 // Handle upload completion
                 uploadTask.observe(.success) { [weak self] _ in
+                    guard let self = self else {
+                        continuation.resume(throwing: ProfileError.unknown)
+                        return
+                    }
+                    
                     Task {
                         do {
                             let downloadURL = try await photoRef.downloadURL()
-                            await MainActor.run {
-                                self?.profileImageURL = downloadURL
-                            }
+                            
+                            // Cache the image data and update UI
+                            try await self.updateProfileImageCache(userId: userId, imageData: imageData, url: downloadURL)
+                            
+                            // Log successful upload
+                            self.logger.info("Profile image uploaded successfully: \(downloadURL.absoluteString)")
+                            self.analytics.logProfilePhotoUpdate()
+                            
                             continuation.resume(returning: downloadURL.absoluteString)
                         } catch {
-                            continuation.resume(throwing: error)
+                            self.logger.error("Failed to get download URL: \(error.localizedDescription)")
+                            continuation.resume(throwing: ProfileError.downloadURLFailed)
                         }
                     }
                 }
                 
                 // Handle upload failure
                 uploadTask.observe(.failure) { snapshot in
-                    if let error = snapshot.error {
-                        continuation.resume(throwing: error)
+                    if let error = snapshot.error as NSError? {
+                        self.logger.error("Upload failed: \(error.localizedDescription)")
+                        
+                        // Map Firebase errors to our ProfileError enum
+                        let mappedError: ProfileError
+                        switch error.code {
+                        case StorageErrorCode.quotaExceeded.rawValue:
+                            mappedError = .quotaExceeded
+                        case StorageErrorCode.unauthenticated.rawValue:
+                            mappedError = .unauthorized
+                        case StorageErrorCode.objectNotFound.rawValue:
+                            mappedError = .uploadFailed
+                        default:
+                            mappedError = .unknown
+                        }
+                        
+                        continuation.resume(throwing: mappedError)
+                    } else {
+                        continuation.resume(throwing: ProfileError.uploadFailed)
                     }
                 }
             }
         } catch {
-            self.errorHandler.handle(error, context: "Error uploading profile image")
+            logger.error("Image processing failed: \(error.localizedDescription)")
             throw error
         }
     }
     
-    /// Gets the cached profile image
-    /// - Parameter userId: ID of the user
-    /// - Returns: The cached profile image, or nil if not found
-    func getCachedProfileImage(userId: String) async throws -> UIImage? {
-        let fileManager = FileManager.default
-        let cacheDirectory = try fileManager.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-        let localURL = cacheDirectory.appendingPathComponent("\(userId)_profile.jpg")
+    /// Updates the profile image cache and UI
+    /// - Parameters:
+    ///   - userId: The user ID
+    ///   - imageData: The image data to cache
+    ///   - url: The download URL of the image
+    private func updateProfileImageCache(userId: String, imageData: Data, url: URL) async throws {
+        // Cache the image data
+        try await CacheService.shared.cacheProfileImage(userId: userId, imageData: imageData)
         
-        if fileManager.fileExists(atPath: localURL.path) {
-            // Load from local cache
-            if let imageData = try? Data(contentsOf: localURL),
-               let image = UIImage(data: imageData) {
-                return image
-            }
+        // Update UI
+        await MainActor.run {
+            self.profileImageURL = url
+            self.profileImage = UIImage(data: imageData)
+            self.uploadProgress = 1.0
+        }
+    }
+    
+    /// Loads the profile image, using cache if available
+    /// - Parameter userId: The user ID whose profile image to load
+    /// - Returns: True if the image was loaded successfully
+    @MainActor
+    func loadProfileImage(userId: String) async -> Bool {
+        // Try cache first
+        if let cachedImage = await loadCachedProfileImage(userId: userId) {
+            self.profileImage = cachedImage
+            return true
         }
         
-        // If not in cache, download from Firebase
-        guard let photoURL = user?.photoURL,
-              let url = URL(string: photoURL) else {
-            return nil
+        // Fall back to network if needed
+        guard let profileURL = profileImageURL else {
+            return false
         }
-        
-        let photoRef = storage.reference(forURL: photoURL)
         
         do {
-            // Download and cache the image
-            _ = try await photoRef.write(toFile: localURL)
+            let (data, _) = try await URLSession.shared.data(from: profileURL)
             
-            // Load the newly cached image
-            if let imageData = try? Data(contentsOf: localURL),
-               let image = UIImage(data: imageData) {
-                return image
-            }
+            // Cache the downloaded image
+            try await CacheService.shared.cacheProfileImage(userId: userId, imageData: data)
+            
+            // Update UI
+            self.profileImage = UIImage(data: data)
+            return true
         } catch {
-            logger.error("Failed to download profile image: \(error.localizedDescription)")
-            throw error
+            logger.error("Failed to load profile image from network: \(error.localizedDescription)")
+            return false
         }
-        
-        return nil
+    }
+    
+    /// Loads the cached profile image for a user
+    /// - Parameter userId: The user ID whose profile image to load
+    /// - Returns: Optional UIImage if cached image exists
+    private func loadCachedProfileImage(userId: String) async -> UIImage? {
+        guard let imageData = await CacheService.shared.getCachedProfileImage(userId: userId) else {
+            return nil
+        }
+        return UIImage(data: imageData)
     }
     
     /// Compresses an image while maintaining reasonable quality
     /// - Parameters:
     ///   - image: The original UIImage
-    ///   - maxSizeKB: Maximum size in kilobytes (default: 500)
+    ///   - maxSizeKB: Maximum size in kilobytes (default: 5120)
     /// - Returns: Compressed image data
-    private func compressImage(_ image: UIImage, maxSizeKB: Int = 500) throws -> Data {
+    private func compressImage(_ image: UIImage, maxSizeKB: Int = 5120) throws -> Data {
         var compression: CGFloat = 0.8
-        let maxBytes = maxSizeKB * 1024
+        let maxBytes = maxSizeKB * 1024 // 5MB limit
         
         guard var imageData = image.jpegData(compressionQuality: compression) else {
             throw ProfileError.invalidImage
         }
         
-        // If already under max size, return
-        if imageData.count <= maxBytes {
-            return imageData
-        }
-        
-        // Binary search for appropriate compression level
-        var min: CGFloat = 0
-        var max: CGFloat = 1
-        
-        for _ in 0..<6 { // Maximum 6 attempts
-            compression = (max + min) / 2
-            
-            if let data = image.jpegData(compressionQuality: compression) {
-                if data.count < Int(Double(maxBytes) * 0.9) {
-                    min = compression
-                } else if data.count > maxBytes {
-                    max = compression
-                } else {
-                    imageData = data
-                    break
-                }
-                imageData = data
+        // Try compression first
+        while imageData.count > maxBytes && compression > 0.1 {
+            compression -= 0.1
+            if let compressedData = image.jpegData(compressionQuality: compression) {
+                imageData = compressedData
             }
         }
         
         // If still too large, resize the image
         if imageData.count > maxBytes {
             let scale = sqrt(Double(maxBytes) / Double(imageData.count))
-            let size = CGSize(
+            let newSize = CGSize(
                 width: image.size.width * scale,
                 height: image.size.height * scale
             )
             
-            UIGraphicsBeginImageContextWithOptions(size, false, image.scale)
-            image.draw(in: CGRect(origin: .zero, size: size))
+            UIGraphicsBeginImageContextWithOptions(newSize, false, image.scale)
+            image.draw(in: CGRect(origin: .zero, size: newSize))
             let resizedImage = UIGraphicsGetImageFromCurrentImageContext()
             UIGraphicsEndImageContext()
             
-            guard let finalData = resizedImage?.jpegData(compressionQuality: compression) else {
+            guard let resizedImageData = resizedImage?.jpegData(compressionQuality: compression) else {
                 throw ProfileError.invalidImage
             }
             
-            imageData = finalData
+            imageData = resizedImageData
+            
+            if imageData.count > maxBytes {
+                throw ProfileError.sizeLimitExceeded
+            }
         }
         
         return imageData

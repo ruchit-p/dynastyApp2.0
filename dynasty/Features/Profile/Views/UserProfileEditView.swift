@@ -171,6 +171,12 @@ struct UserProfileEditView: View {
                         .scaledToFit()
                         .frame(width: 100, height: 100)
                         .clipShape(Circle())
+                } else if let displayImage = viewModel.profileImage {
+                    Image(uiImage: displayImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 100, height: 100)
+                        .clipShape(Circle())
                 } else if let imageURL = viewModel.profileImageURL {
                     AsyncImage(url: imageURL) { image in
                         image
@@ -190,6 +196,13 @@ struct UserProfileEditView: View {
                 }
             }
             .accessibilityLabel("Profile photo")
+            .onAppear {
+                if let userId = viewModel.user?.id {
+                    Task {
+                        await viewModel.loadProfileImage(userId: userId)
+                    }
+                }
+            }
             
             Button("Change Profile Picture") {
                 isShowingImagePicker = true
@@ -199,7 +212,8 @@ struct UserProfileEditView: View {
             
             if viewModel.isUploading {
                 ProgressView("Uploading", value: viewModel.uploadProgress, total: 1.0)
-                    .padding(.top, 8)
+                    .progressViewStyle(.linear)
+                    .padding(.horizontal)
             }
         }
     }
@@ -297,6 +311,6 @@ struct CustomTextField: View {
         updatedAt: nil
     )
     
-    return UserProfileEditView(currentUser: previewUser)
+    UserProfileEditView(currentUser: previewUser)
         .environmentObject(AuthManager())
 }

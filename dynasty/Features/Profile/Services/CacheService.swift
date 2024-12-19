@@ -1,6 +1,7 @@
 import Foundation
 import FirebaseFirestore
 import UIKit
+import OSLog
 
 /// Keys used for caching different types of data
 enum CacheKey: String, CaseIterable {
@@ -12,17 +13,44 @@ enum CacheKey: String, CaseIterable {
     case faqs = "cached_faqs"
     /// Timestamp of last sync with server
     case lastSyncTimestamp = "last_sync_timestamp"
+    /// Profile image data
+    case profileImage = "cached_profile_image"
+}
+
+/// Errors that can occur during caching operations
+enum CacheError: Error {
+    case directoryCreationFailed
+    case fileWriteFailed
+    case fileReadFailed
+    case invalidPath
+    
+    var localizedDescription: String {
+        switch self {
+        case .directoryCreationFailed:
+            return "Failed to create cache directory"
+        case .fileWriteFailed:
+            return "Failed to write file to cache"
+        case .fileReadFailed:
+            return "Failed to read file from cache"
+        case .invalidPath:
+            return "Invalid file path"
+        }
+    }
 }
 
 /// Service responsible for caching app data locally
-/// This includes user profiles, settings, FAQs
-class CacheService {
+/// This includes user profiles, settings, FAQs, and profile images
+actor CacheService {
     /// Shared instance for singleton access
     static let shared = CacheService()
     
     private let defaults = UserDefaults.standard
+    private let fileManager = FileManager.default
+    private let logger = Logger(subsystem: "com.dynasty.CacheService", category: "Cache")
     
-    private init() {}
+    private init() {
+        createCacheDirectoryIfNeeded()
+    }
     
     // MARK: - User Profile Caching
     
@@ -79,13 +107,84 @@ class CacheService {
         return try? JSONDecoder().decode([FAQ].self, from: data)
     }
     
+    // MARK: - Profile Image Caching
+    
+    /// Caches profile image data to the file system
+    /// - Parameters:
+    ///   - userId: User ID to associate with the cached image
+    ///   - imageData: Image data to cache
+    /// - Throws: CacheError if saving fails
+    func cacheProfileImage(userId: String, imageData: Data) throws {
+        do {
+            let cacheDirectory = try getCacheDirectory()
+            let imageUrl = cacheDirectory.appendingPathComponent("\(userId)_profile.jpg")
+            
+            try imageData.write(to: imageUrl)
+            
+            // Store the image path in UserDefaults for quick lookup
+            let imagePath = imageUrl.path
+            let key = makeProfileImageKey(userId: userId)
+            defaults.set(imagePath, forKey: key)
+            
+            logger.debug("Successfully cached profile image for user: \(userId)")
+        } catch {
+            logger.error("Failed to cache profile image: \(error.localizedDescription)")
+            throw CacheError.fileWriteFailed
+        }
+    }
+    
+    /// Retrieves cached profile image data for a user
+    /// - Parameter userId: User ID to retrieve image for
+    /// - Returns: Optional Data containing the image if it exists
+    func getCachedProfileImage(userId: String) -> Data? {
+        let key = makeProfileImageKey(userId: userId)
+        guard let imagePath = defaults.string(forKey: key) else {
+            logger.debug("No cached image path found for user: \(userId)")
+            return nil
+        }
+        
+        let imageUrl = URL(fileURLWithPath: imagePath)
+        
+        guard fileManager.fileExists(atPath: imagePath) else {
+            logger.debug("Cached image file not found at path: \(imagePath)")
+            // Clean up stale reference
+            defaults.removeObject(forKey: key)
+            return nil
+        }
+        
+        do {
+            let imageData = try Data(contentsOf: imageUrl)
+            logger.debug("Successfully retrieved cached image for user: \(userId)")
+            return imageData
+        } catch {
+            logger.error("Failed to read cached image: \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
     // MARK: - Cache Management
     
-    /// Clears all cached data, including UserDefaults
+    /// Clears all cached data, including UserDefaults and profile images
     func clearCache() {
         // Clear UserDefaults cache
         CacheKey.allCases.forEach { key in
             defaults.removeObject(forKey: key.rawValue)
+        }
+        
+        // Clear all profile image keys
+        let allKeys = defaults.dictionaryRepresentation().keys
+        for key in allKeys where key.hasPrefix(CacheKey.profileImage.rawValue) {
+            defaults.removeObject(forKey: key)
+        }
+        
+        // Clear profile image cache directory
+        do {
+            let cacheDirectory = try getCacheDirectory()
+            try fileManager.removeItem(at: cacheDirectory)
+            try fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+            logger.info("Successfully cleared cache directory")
+        } catch {
+            logger.error("Failed to clear cache directory: \(error.localizedDescription)")
         }
     }
     
@@ -99,25 +198,27 @@ class CacheService {
         // Consider cache stale after 1 hour
         return Date().timeIntervalSince(lastSync) > 3600
     }
-}
-
-/// Errors that can occur during caching operations
-enum CacheError: Error {
-    /// Failed to convert data
-    case invalidData
-    /// Failed to write data to cache
-    case writeFailed
-    /// Failed to read data from cache
-    case readFailed
     
-    var localizedDescription: String {
-        switch self {
-        case .invalidData:
-            return "Invalid data format"
-        case .writeFailed:
-            return "Failed to write to cache"
-        case .readFailed:
-            return "Failed to read from cache"
+    // MARK: - Private Helper Methods
+    
+    private func createCacheDirectoryIfNeeded() {
+        do {
+            let cacheDirectory = try getCacheDirectory()
+            if !fileManager.fileExists(atPath: cacheDirectory.path) {
+                try fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+                logger.info("Created cache directory at: \(cacheDirectory.path)")
+            }
+        } catch {
+            logger.error("Failed to create cache directory: \(error.localizedDescription)")
         }
+    }
+    
+    private func getCacheDirectory() throws -> URL {
+        try fileManager.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("ProfileImages")
+    }
+    
+    private func makeProfileImageKey(userId: String) -> String {
+        "\(CacheKey.profileImage.rawValue)_\(userId)"
     }
 }

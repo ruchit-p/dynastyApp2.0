@@ -2,13 +2,6 @@ import Foundation
 import FirebaseFirestore
 import FirebaseAuth
 
-enum Gender: String, Codable {
-    case male
-    case female
-    case other
-    case notSpecified
-}
-
 struct FamilyMember: Identifiable, Codable, Hashable {
     // MARK: - Essential Properties
     @DocumentID var id: String?
@@ -31,7 +24,7 @@ struct FamilyMember: Identifiable, Codable, Hashable {
     var accountCreatedAt: Date?
     
     // MARK: - Extended Information
-    var gender: Gender = .notSpecified
+    var gender: Gender = .other
     var isAlive: Bool = true
     var dateOfDeath: Date?
     var birthPlace: String?
@@ -66,7 +59,7 @@ struct FamilyMember: Identifiable, Codable, Hashable {
          isRegisteredUser: Bool = false,
          lastLoginDate: Date? = nil,
          accountCreatedAt: Date? = nil,
-         gender: Gender = .notSpecified,
+         gender: Gender = .other,
          isAlive: Bool = true,
          dateOfDeath: Date? = nil,
          birthPlace: String? = nil,
@@ -138,7 +131,7 @@ struct FamilyMember: Identifiable, Codable, Hashable {
         self.spouseId = node.spouseIds.first
         self.generation = node.generation
         self.isRegisteredUser = node.isRegisteredUser
-        self.gender = Gender(rawValue: node.gender.rawValue) ?? .notSpecified
+        self.gender = Gender(rawValue: node.gender.rawValue) ?? .other
         self.isAdmin = false  // Default values for admin properties
         self.canAddMembers = false
         self.canEdit = node.canEdit

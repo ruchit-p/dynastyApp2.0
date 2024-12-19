@@ -15,7 +15,13 @@ struct ProfileView: View {
                     // Profile Header
                     VStack(spacing: 16) {
                         if let user = viewModel.user {
-                            if let photoURL = user.photoURL, let url = URL(string: photoURL) {
+                            if let profileImage = viewModel.profileImage {
+                                Image(uiImage: profileImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 100, height: 100)
+                                    .clipShape(Circle())
+                            } else if let photoURL = user.photoURL, let url = URL(string: photoURL) {
                                 AsyncImage(url: url) { image in
                                     image.resizable()
                                 } placeholder: {
@@ -32,7 +38,7 @@ struct ProfileView: View {
                                     .foregroundColor(.blue)
                             }
                             
-                            Text("Hey, \(user.displayName)!")
+                            Text("Hey, \(user.firstName ?? "there")!")
                                 .font(.title)
                                 .fontWeight(.semibold)
                         } else {
@@ -50,6 +56,14 @@ struct ProfileView: View {
                         }
                     }
                     .padding(.vertical, 32)
+                    .onAppear {
+                        if let user = viewModel.user,
+                           let userId = user.id {
+                            Task {
+                                await viewModel.loadProfileImage(userId: userId)
+                            }
+                        }
+                    }
                     
                     if let error = viewModel.error {
                         Text(error.localizedDescription)
