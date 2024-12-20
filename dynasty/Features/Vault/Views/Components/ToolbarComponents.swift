@@ -27,8 +27,7 @@ struct VaultToolbar: View {
             } else {
                 NavigationMenu(
                     isSelecting: $isSelecting,
-                    showNewFolderPrompt: $showNewFolderPrompt,
-                    navigationPath: navigationPath
+                    showNewFolderPrompt: $showNewFolderPrompt
                 )
                 Spacer()
                 SortMenu(filteredItems: filteredItems)
@@ -98,7 +97,6 @@ struct SelectionModeButton: View {
 struct NavigationMenu: View {
     @Binding var isSelecting: Bool
     @Binding var showNewFolderPrompt: Bool
-    var navigationPath: NavigationPath
 
     var body: some View {
         Menu {

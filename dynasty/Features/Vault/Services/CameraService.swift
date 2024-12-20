@@ -22,7 +22,7 @@ class CameraService: ObservableObject {
         }
 
         do {
-            guard let userId = vaultManager.currentUser?.id else {
+            guard let userId = await vaultManager.currentUser?.id else {
                 logger.error("No authenticated user")
                 self.error = VaultError.authenticationFailed("Please sign in to upload photos")
                 self.showError = true
@@ -30,9 +30,9 @@ class CameraService: ObservableObject {
             }
 
             let filename = "\(UUID().uuidString).jpg"
-            let encryptionKeyId = try  vaultManager.generateEncryptionKey(for: userId)
+            let encryptionKeyId = try await vaultManager.generateEncryptionKey(for: userId)
 
-            let metadata = VaultItemMetadata(
+            let metadata = await VaultItemMetadata(
                 originalFileName: filename,
                 fileSize: Int64(data.count),
                 mimeType: "image/jpeg",

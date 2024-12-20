@@ -12,7 +12,7 @@ class FamilyTreeViewModel: ObservableObject {
     @Published var selectedNodeId: String?
     @Published var isEditMode = false
     
-    private let manager = FamilyTreeManager.shared
+    internal let manager = FamilyTreeManager.shared
     private let db = FirestoreManager.shared.getDB()
     private var cancellables = Set<AnyCancellable>()
     let treeId: String
@@ -60,7 +60,8 @@ class FamilyTreeViewModel: ObservableObject {
             siblingIds: [],
             role: .member,
             canAddMembers: node.canEdit,
-            canEdit: node.canEdit
+            canEdit: node.canEdit,
+            updatedAt: node.updatedAt
         )
         try await manager.updateMember(updatedUser, in: treeId)
         await loadTreeData()
@@ -293,6 +294,76 @@ class FamilyTreeViewModel: ObservableObject {
         await loadTreeData()
     }
     
+    // MARK: - Member Addition Methods
+    
+    func addParent(_ parent: User, to child: FamilyTreeNode) async throws {
+        var updatedChild = child
+        updatedChild.parentIds.append(parent.id!)
+        
+        var updatedParent = FamilyTreeNode(from: parent)
+        updatedParent.childrenIds.append(child.id)
+        
+        try await manager.addMember(
+            email: parent.email ?? "",
+            to: treeId,
+            relationship: RelationType.parent.rawValue
+        )
+        try await updateMember(updatedChild)
+        try await updateMember(updatedParent)
+    }
+    
+    func addSpouse(_ spouse: User, to member: FamilyTreeNode) async throws {
+        var updatedMember = member
+        updatedMember.spouseIds.append(spouse.id!)
+        
+        var updatedSpouse = FamilyTreeNode(from: spouse)
+        updatedSpouse.spouseIds.append(member.id)
+        
+        try await manager.addMember(
+            email: spouse.email ?? "",
+            to: treeId,
+            relationship: RelationType.spouse.rawValue
+        )
+        try await updateMember(updatedMember)
+        try await updateMember(updatedSpouse)
+    }
+    
+    func addChild(_ child: User, to parent: FamilyTreeNode) async throws {
+        var updatedParent = parent
+        updatedParent.childrenIds.append(child.id!)
+        
+        var updatedChild = FamilyTreeNode(from: child)
+        updatedChild.parentIds.append(parent.id)
+        
+        try await manager.addMember(
+            email: child.email ?? "",
+            to: treeId,
+            relationship: RelationType.child.rawValue
+        )
+        try await updateMember(updatedParent)
+        try await updateMember(updatedChild)
+    }
+    
+    func addSibling(_ sibling: User, to member: FamilyTreeNode) async throws {
+        var updatedSibling = FamilyTreeNode(from: sibling)
+        updatedSibling.parentIds = member.parentIds
+        
+        try await manager.addMember(
+            email: sibling.email ?? "",
+            to: treeId,
+            relationship: RelationType.sibling.rawValue
+        )
+        try await updateMember(updatedSibling)
+        
+        // Update parents to include the new child
+        for parentId in member.parentIds {
+            if var parent = nodes[parentId] {
+                parent.childrenIds.append(sibling.id!)
+                try await updateMember(parent)
+            }
+        }
+    }
+    
     struct NodePosition {
         let position: CGPoint
         
@@ -318,5 +389,27 @@ class FamilyTreeViewModel: ObservableObject {
             self.children = children
             self.siblings = siblings
         }
+    }
+    
+    private func mapToFamilyMember(node: FamilyTreeNode) -> FamilyMember {
+        return FamilyMember(
+            id: node.id,
+            firstName: node.firstName,
+            lastName: node.lastName,
+            email: node.email ?? "",
+            displayName: node.fullName,
+            dateOfBirth: node.dateOfBirth,
+            profileImageURL: node.photoURL,
+            parentIds: node.parentIds,
+            childrenIds: node.childrenIds,
+            spouseIds: node.spouseIds,
+            generation: node.generation,
+            isRegisteredUser: node.isRegisteredUser,
+            gender: node.gender,
+            isAdmin: false,  // Default values for admin properties
+            canAddMembers: node.canEdit,
+            canEdit: node.canEdit,
+            updatedAt: node.updatedAt
+        )
     }
 }

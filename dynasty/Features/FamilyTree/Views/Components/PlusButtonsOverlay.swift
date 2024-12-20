@@ -7,6 +7,10 @@ struct PlusButtonsOverlay: View {
     @State private var relationType: RelationType = .child
     let user: User?
     @ObservedObject var viewModel: FamilyTreeViewModel
+    let onAddParent: () -> Void
+    let onAddSpouse: () -> Void
+    let onAddChild: () -> Void
+    let onAddSibling: () -> Void
 
     var body: some View {
         GeometryReader { geometry in
@@ -18,44 +22,41 @@ struct PlusButtonsOverlay: View {
                         // Circle representing the selected member
                         FamilyMemberNodeView(
                             member: selectedNode,
-                            isSelected: true
-                        ) {
-                            // No action needed here
-                        }
+                            isSelected: true,
+                            action: {}
+                        )
                         
                         // Top Plus Button for Parent
-                        AddButton(
-                            actions: [
-                                AddButtonAction(
-                                    title: "Add Parent",
-                                    systemImage: "person.badge.plus",
-                                    action: {
-                                        relationType = .parent
-                                        showingAddFamilyMemberForm = true
-                                    }
-                                )
-                            ],
-                            buttonSize: 30,
-                            backgroundColor: .blue
-                        )
-                        .offset(y: -60)
+                        if selectedNode.parentIds.count < 2 {
+                            AddButton(
+                                actions: [
+                                    AddButtonAction(
+                                        title: "Add Parent",
+                                        systemImage: "person.badge.plus",
+                                        action: onAddParent
+                                    )
+                                ],
+                                buttonSize: 30,
+                                backgroundColor: .blue
+                            )
+                            .offset(y: -60)
+                        }
                         
-                        // Right Plus Button for Partner
-                        AddButton(
-                            actions: [
-                                AddButtonAction(
-                                    title: "Add Partner",
-                                    systemImage: "person.2",
-                                    action: {
-                                        relationType = .partner
-                                        showingAddFamilyMemberForm = true
-                                    }
-                                )
-                            ],
-                            buttonSize: 30,
-                            backgroundColor: .green
-                        )
-                        .offset(x: 60)
+                        // Right Plus Button for Spouse
+                        if selectedNode.spouseIds.isEmpty {
+                            AddButton(
+                                actions: [
+                                    AddButtonAction(
+                                        title: "Add Spouse",
+                                        systemImage: "person.2",
+                                        action: onAddSpouse
+                                    )
+                                ],
+                                buttonSize: 30,
+                                backgroundColor: .green
+                            )
+                            .offset(x: 60)
+                        }
                         
                         // Bottom Plus Button for Child
                         AddButton(
@@ -63,10 +64,7 @@ struct PlusButtonsOverlay: View {
                                 AddButtonAction(
                                     title: "Add Child",
                                     systemImage: "person.badge.plus",
-                                    action: {
-                                        relationType = .child
-                                        showingAddFamilyMemberForm = true
-                                    }
+                                    action: onAddChild
                                 )
                             ],
                             buttonSize: 30,
@@ -80,10 +78,7 @@ struct PlusButtonsOverlay: View {
                                 AddButtonAction(
                                     title: "Add Sibling",
                                     systemImage: "person.2.square.stack",
-                                    action: {
-                                        relationType = .sibling
-                                        showingAddFamilyMemberForm = true
-                                    }
+                                    action: onAddSibling
                                 )
                             ],
                             buttonSize: 30,
@@ -99,9 +94,6 @@ struct PlusButtonsOverlay: View {
             .background(Color.black.opacity(0.5))
             .onTapGesture {
                 showAddButtons = false
-            }
-            .sheet(isPresented: $showingAddFamilyMemberForm) {
-                AddFamilyMemberForm(viewModel: viewModel)
             }
         }
     }

@@ -5,28 +5,15 @@ import FirebaseFirestore
 struct AddFamilyMemberForm: View {
     @ObservedObject var viewModel: FamilyTreeViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var relationType: RelationType = .child // Change FamilyRelationship to RelationType
+    let selectedNode: FamilyTreeNode?
     
     @State private var email = ""
     @State private var firstName = ""
     @State private var lastName = ""
     @State private var dateOfBirth = Date()
     @State private var selectedGender = Gender.other
-    @State private var relationship = "child"
     @State private var showingError = false
-    
-    let relationships = [
-        ("parent", "Parent"),
-        ("child", "Child"),
-        ("spouse", "Spouse"),
-        ("sibling", "Sibling")
-    ]
-    
-    let genders = [
-        (Gender.male, "Male"),
-        (Gender.female, "Female"),
-        (Gender.nonBinary, "Non-Binary"),
-        (Gender.other, "Other")
-    ]
     
     var body: some View {
         NavigationView {
@@ -46,24 +33,16 @@ struct AddFamilyMemberForm: View {
                     DatePicker("Date of Birth", selection: $dateOfBirth, displayedComponents: .date)
                     
                     Picker("Gender", selection: $selectedGender) {
-                        ForEach(genders, id: \.0) { value, label in
-                            Text(label).tag(value)
-                        }
-                    }
-                }
-                
-                Section(header: Text("Relationship")) {
-                    Picker("Relationship to You", selection: $relationship) {
-                        ForEach(relationships, id: \.0) { value, label in
-                            Text(label).tag(value)
-                        }
+                        Text("Male").tag(Gender.male)
+                        Text("Female").tag(Gender.female)
+                        Text("Non-Binary").tag(Gender.nonBinary)
+                        Text("Other").tag(Gender.other)
                     }
                 }
                 
                 Section {
                     Button(action: addMember) {
                         HStack {
-                            Spacer()
                             Text("Add Member")
                             Spacer()
                         }
@@ -71,7 +50,7 @@ struct AddFamilyMemberForm: View {
                     .disabled(email.isEmpty || firstName.isEmpty)
                 }
             }
-            .navigationTitle("Add Family Member")
+            .navigationTitle(getNavigationTitle())
             .navigationBarItems(
                 leading: Button("Cancel") {
                     dismiss()
@@ -84,6 +63,19 @@ struct AddFamilyMemberForm: View {
                     Text(error.localizedDescription)
                 }
             }
+        }
+    }
+    
+    private func getNavigationTitle() -> String {
+        switch relationType {
+        case .parent:
+            return "Add Parent"
+        case .spouse:
+            return "Add Spouse"
+        case .child:
+            return "Add Child"
+        case .sibling:
+            return "Add Sibling"
         }
     }
     
@@ -110,11 +102,30 @@ struct AddFamilyMemberForm: View {
                 canEdit: false
             )
             
-            try? await viewModel.addMember(newMember, relationship: relationship)
-            
-            if viewModel.error == nil {
-                dismiss()
-            } else {
+            do {
+                switch relationType {
+                case .parent:
+                    if let selectedNode = selectedNode {
+                        try await viewModel.addParent(newMember, to: selectedNode)
+                    }
+                case .spouse:
+                    if let selectedNode = selectedNode {
+                        try await viewModel.addSpouse(newMember, to: selectedNode)
+                    }
+                case .child:
+                    if let selectedNode = selectedNode {
+                        try await viewModel.addChild(newMember, to: selectedNode)
+                    }
+                case .sibling:
+                    if let selectedNode = selectedNode {
+                        try await viewModel.addSibling(newMember, to: selectedNode)
+                    }
+                }
+                
+                if viewModel.error == nil {
+                    dismiss()
+                }
+            } catch {
                 showingError = true
             }
         }
@@ -122,5 +133,8 @@ struct AddFamilyMemberForm: View {
 }
 
 #Preview {
-    AddFamilyMemberForm(viewModel: FamilyTreeViewModel(treeId: "preview-tree", userId: "preview-user"))
+    AddFamilyMemberForm(
+        viewModel: FamilyTreeViewModel(treeId: "preview-tree", userId: "preview-user"),
+        selectedNode: nil
+    )
 }

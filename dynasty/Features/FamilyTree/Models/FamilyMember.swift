@@ -15,7 +15,7 @@ struct FamilyMember: Identifiable, Codable, Hashable {
     // Core Family Tree Fields
     var parentIds: [String] = []
     var childrenIds: [String] = []
-    var spouseId: String?
+    var spouseIds: [String] = []
     var generation: Int?
     
     // MARK: - User Status
@@ -54,7 +54,7 @@ struct FamilyMember: Identifiable, Codable, Hashable {
          profileImageURL: String? = nil,
          parentIds: [String] = [],
          childrenIds: [String] = [],
-         spouseId: String? = nil,
+         spouseIds: [String] = [],
          generation: Int? = nil,
          isRegisteredUser: Bool = false,
          lastLoginDate: Date? = nil,
@@ -81,7 +81,7 @@ struct FamilyMember: Identifiable, Codable, Hashable {
         self.profileImageURL = profileImageURL
         self.parentIds = parentIds
         self.childrenIds = childrenIds
-        self.spouseId = spouseId
+        self.spouseIds = spouseIds
         self.generation = generation
         self.isRegisteredUser = isRegisteredUser
         self.lastLoginDate = lastLoginDate
@@ -128,7 +128,7 @@ struct FamilyMember: Identifiable, Codable, Hashable {
         self.profileImageURL = node.photoURL
         self.parentIds = node.parentIds
         self.childrenIds = node.childrenIds
-        self.spouseId = node.spouseIds.first
+        self.spouseIds = node.spouseIds
         self.generation = node.generation
         self.isRegisteredUser = node.isRegisteredUser
         self.gender = Gender(rawValue: node.gender.rawValue) ?? .other

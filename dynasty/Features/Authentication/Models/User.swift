@@ -20,7 +20,7 @@ enum UserRole: String, Codable {
 
 /// A model representing a user in the Dynasty app.
 /// This model stores personal information, relationships, roles, and metadata about the user.
-struct User: Codable, Identifiable {
+struct User: Codable, Identifiable, Hashable {
     // MARK: - Identity
     
     /// The unique Firestore document ID for the user.
@@ -216,5 +216,21 @@ struct User: Codable, Identifiable {
         case photoURL
         case createdAt
         case updatedAt
+    }
+    
+    // MARK: - Equatable Conformance
+
+    static func == (lhs: User, rhs: User) -> Bool {
+        // Define equality based on the properties you consider relevant.
+        // A common approach is to compare the `id` properties if they are unique.
+        return lhs.id == rhs.id
+    }
+
+    // MARK: - Hashable Conformance
+
+    func hash(into hasher: inout Hasher) {
+        // Combine the hash values of the properties you used in the `==` function.
+        hasher.combine(id)
+        // ... combine other properties if necessary ...
     }
 }

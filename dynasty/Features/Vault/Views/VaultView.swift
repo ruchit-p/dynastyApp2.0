@@ -24,6 +24,7 @@ struct VaultView: View {
     @State private var navigationPath = NavigationPath()
     @State private var sortOption: VaultSortOption = .date
     @State private var isAscending = false
+    @StateObject private var viewModel = VaultViewModel()
     
     private let logger = Logger(subsystem: "com.dynasty.VaultView", category: "UI")
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: UIDevice.current.userInterfaceIdiom == .pad ? 4 : 3)
@@ -178,8 +179,12 @@ struct VaultView: View {
                     await VaultPhotoHandlingFunctions.handleSelectedPhotos(newValue, vaultManager: vaultManager, authManager: authManager)
                 }
             }
-            .onChange(of: authManager.user) { oldValue, newValue in
-                VaultAuthenticationFunctions.handleUserChange(newValue, vaultManager: vaultManager, authManager: authManager)
+            .onChange(of: authManager.user) { oldUser, newUser in
+                if let newUser = newUser {
+                    Task {
+                        await viewModel.loadVaultItems(forUser: newUser)
+                    }
+                }
             }
             .errorOverlay(error: error, isPresented: $showError)
             .overlay {

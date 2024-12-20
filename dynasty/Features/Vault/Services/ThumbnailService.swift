@@ -75,7 +75,7 @@ actor ThumbnailService {
             case .video:
                 thumbnail = try await self.generateVideoThumbnail(from: data)
             case .audio:
-                thumbnail = try await self.generateAudioThumbnail()
+                thumbnail = await self.generateAudioThumbnail()
             case .folder:
                 thumbnail = UIImage(systemName: "folder") ?? UIImage()
             }
@@ -102,37 +102,17 @@ actor ThumbnailService {
     private func generateImageThumbnail(from data: Data) async throws -> UIImage {
         try await withCheckedThrowingContinuation { continuation in
             processingQueue.async {
-                autoreleasepool {
-                    do {
-                        guard let image = UIImage(data: data) else {
-                            continuation.resume(throwing: ThumbnailError.thumbnailGenerationFailed)
-                            return
-                        }
-                        
-                        let format = UIGraphicsImageRendererFormat()
-                        format.scale = UIScreen.main.scale
-                        format.opaque = true
-                        
-                        let renderer = UIGraphicsImageRenderer(size: self.thumbnailSize, format: format)
-                        let thumbnail = renderer.image { context in
-                            let rect = CGRect(origin: .zero, size: self.thumbnailSize)
-                            context.cgContext.setFillColor(UIColor.systemBackground.cgColor)
-                            context.cgContext.fill(rect)
-                            
-                            let size = AVMakeRect(aspectRatio: image.size, insideRect: rect).size
-                            image.draw(in: CGRect(
-                                origin: CGPoint(
-                                    x: (self.thumbnailSize.width - size.width) / 2,
-                                    y: (self.thumbnailSize.height - size.height) / 2
-                                ),
-                                size: size
-                            ))
-                        }
-                        
-                        continuation.resume(returning: thumbnail)
-                    } catch {
-                        continuation.resume(throwing: error)
+                do {
+                    let thumbnailImage = UIGraphicsGetImageFromCurrentImageContext()
+                    UIGraphicsEndImageContext()
+
+                    guard let thumbnail = thumbnailImage else {
+                        continuation.resume(throwing: VaultError.thumbnailGenerationFailed("Failed to generate thumbnail"))
+                        return
                     }
+                    continuation.resume(returning: thumbnail)
+                } catch {
+                    continuation.resume(throwing: error)
                 }
             }
         }

@@ -6,14 +6,22 @@ import FirebaseFirestore
 class VaultAuthenticationFunctions {
     private static let logger = Logger(subsystem: "com.dynasty.VaultView", category: "Authentication")
     
-    @MainActor static func handleUserChange(_ user: User?, vaultManager: VaultManager, authManager: AuthManager) {
-        guard let user = user, let userId = user.id else {
+    @MainActor static func handleUserChange(_ user: FirebaseAuth.User?, vaultManager: VaultManager, authManager: AuthManager) {
+        guard let user = user else {
+            // User is logged out, handle accordingly
             vaultManager.lock()
             return
         }
         
-        vaultManager.setCurrentUser(user)
-        authenticate(userId: userId, vaultManager: vaultManager, authManager: authManager)
+        // User is logged in, initialize the vault
+        Task {
+            do {
+                vaultManager.setCurrentUser(authManager.user)
+                try await vaultManager.unlock()
+            } catch {
+                logger.error("Error initializing vault: \(error.localizedDescription)")
+            }
+        }
     }
     
     @MainActor static func authenticate(userId: String, vaultManager: VaultManager, authManager: AuthManager) {

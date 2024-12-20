@@ -1,11 +1,18 @@
 import SwiftUI
 import FirebaseAuth
+import FirebaseFirestore
 
 struct FamilyTreeView: View {
     @StateObject private var viewModel: FamilyTreeViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var showingAddMemberSheet = false
     @State private var showingErrorAlert = false
+    @State private var selectedRelationType: RelationType = .child
+    @State private var showAddButtons = false
+    
+    private var selectedNode: FamilyTreeNode? {
+        viewModel.selectedNodeId.flatMap { viewModel.nodes[$0] }
+    }
     
     init(treeId: String) {
         let userId = Auth.auth().currentUser?.uid ?? ""
@@ -26,20 +33,31 @@ struct FamilyTreeView: View {
                             ConnectionLinesView(viewModel: viewModel)
                             
                             // Family members
-                            FamilyMembersLayout(
-                                viewModel: viewModel,
-                                onAddParent: { showingAddMemberSheet = true },
-                                onAddSpouse: { showingAddMemberSheet = true },
-                                onAddChild: { showingAddMemberSheet = true }
-                            )
+                            FamilyMembersLayout(viewModel: viewModel)
                             
                             if let selectedId = viewModel.selectedNodeId,
                                let selectedNode = viewModel.nodes[selectedId] {
                                 PlusButtonsOverlay(
+                                    selectedNode: selectedNode,
+                                    showAddButtons: $showAddButtons,
+                                    user: nil,
                                     viewModel: viewModel,
-                                    onAddParent: { showingAddMemberSheet = true },
-                                    onAddSpouse: { showingAddMemberSheet = true },
-                                    onAddChild: { showingAddMemberSheet = true }
+                                    onAddParent: {
+                                        selectedRelationType = .parent
+                                        showingAddMemberSheet = true
+                                    },
+                                    onAddSpouse: {
+                                        selectedRelationType = .spouse
+                                        showingAddMemberSheet = true
+                                    },
+                                    onAddChild: {
+                                        selectedRelationType = .child
+                                        showingAddMemberSheet = true
+                                    },
+                                    onAddSibling: {
+                                        selectedRelationType = .sibling
+                                        showingAddMemberSheet = true
+                                    }
                                 )
                                 .position(viewModel.nodePositions[selectedId]?.position ?? .zero)
                             }
@@ -54,13 +72,16 @@ struct FamilyTreeView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Button(action: { showingAddMemberSheet = true }) {
+                        Button(action: { 
+                            selectedRelationType = .child
+                            showingAddMemberSheet = true 
+                        }) {
                             Label("Add Family Member", systemImage: "person.badge.plus")
                         }
                         
                         if let currentUserId = Auth.auth().currentUser?.uid,
                            let currentUser = viewModel.nodes[currentUserId],
-                           currentUser.canAddMembers {
+                           currentUser.canEdit {
                             Button(action: { /* Show admin panel */ }) {
                                 Label("Manage Tree", systemImage: "gear")
                             }
@@ -71,11 +92,14 @@ struct FamilyTreeView: View {
                 }
             }
             .sheet(isPresented: $showingAddMemberSheet) {
-                AddFamilyMemberForm(viewModel: viewModel)
+                AddFamilyMemberForm(viewModel: viewModel, selectedNode: selectedNode)
             }
-            .sheet(item: $viewModel.selectedNodeId.map { IdentifiableString(id: $0) }) { nodeId in
+            .sheet(item: Binding<IdentifiableString?>(
+                get: { viewModel.selectedNodeId.map { IdentifiableString(id: $0) } },
+                set: { newValue in viewModel.selectedNodeId = newValue?.id }
+            )) { nodeId in
                 if let node = viewModel.nodes[nodeId.id] {
-                    MemberDetailsView(member: node, viewModel: viewModel)
+                    MemberDetailsView(node: node, viewModel: viewModel)
                 }
             }
             .alert("Error", isPresented: Binding(
@@ -111,7 +135,7 @@ struct EmptyFamilyTreeView: View {
             
             Button(action: {
                 Task {
-                    try? await viewModel.manager.createFamilyTree()
+                    try? await viewModel.createFamilyTree()
                 }
             }) {
                 Text("Create Family Tree")
@@ -138,10 +162,11 @@ struct ConnectionLinesView: View {
                     ForEach(node.parentIds, id: \.self) { parentId in
                         if let parent = viewModel.nodes[parentId] {
                             ConnectionLine(
-                                start: viewModel.nodePositions[parent.id]?.center ?? .zero,
-                                end: viewModel.nodePositions[node.id]?.center ?? .zero,
+                                start: viewModel.nodePositions[parent.id]?.position ?? .zero,
+                                end: viewModel.nodePositions[node.id]?.position ?? .zero,
                                 type: .parent
                             )
+                            .stroke(Color.blue, lineWidth: 2)
                         }
                     }
                 }
@@ -152,10 +177,11 @@ struct ConnectionLinesView: View {
                 if let spouseId = node.spouseIds.first,
                    let spouse = viewModel.nodes[spouseId] {
                     ConnectionLine(
-                        start: viewModel.nodePositions[node.id]?.center ?? .zero,
-                        end: viewModel.nodePositions[spouseId]?.center ?? .zero,
+                        start: viewModel.nodePositions[node.id]?.position ?? .zero,
+                        end: viewModel.nodePositions[spouseId]?.position ?? .zero,
                         type: .spouse
                     )
+                    .stroke(Color.red, lineWidth: 2)
                 }
             }
         }
@@ -164,18 +190,17 @@ struct ConnectionLinesView: View {
 
 struct FamilyMembersLayout: View {
     let viewModel: FamilyTreeViewModel
-    let onAddParent: () -> Void
-    let onAddSpouse: () -> Void
-    let onAddChild: () -> Void
     
     var body: some View {
         ForEach(Array(viewModel.nodes.values)) { node in
             FamilyMemberNodeView(
                 member: node,
                 isSelected: viewModel.selectedNodeId == node.id,
-                action: { viewModel.selectedNodeId = node.id }
+                action: { 
+                    viewModel.selectedNodeId = node.id
+                }
             )
-            .position(viewModel.nodePositions[node.id]?.center ?? .zero)
+            .position(viewModel.nodePositions[node.id]?.position ?? .zero)
         }
     }
 }

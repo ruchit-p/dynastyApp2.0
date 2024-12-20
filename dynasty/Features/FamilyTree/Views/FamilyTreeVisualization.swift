@@ -29,8 +29,8 @@ struct FamilyTreeVisualization: View {
                                         if let parent = viewModel.nodes[parentId],
                                            let parentPosition = viewModel.nodePositions[parentId] {
                                             ConnectionLine(
-                                                start: CGPoint(x: parentPosition.position.x, y: parentPosition.position.y),
-                                                end: CGPoint(x: position.position.x, y: position.position.y),
+                                                start: parentPosition.position,
+                                                end: position.position,
                                                 type: .parent
                                             )
                                             .stroke(Color.blue, lineWidth: 2)
@@ -42,8 +42,8 @@ struct FamilyTreeVisualization: View {
                                         if let spouse = viewModel.nodes[spouseId],
                                            let spousePosition = viewModel.nodePositions[spouseId] {
                                             ConnectionLine(
-                                                start: CGPoint(x: position.position.x, y: position.position.y),
-                                                end: CGPoint(x: spousePosition.position.x, y: spousePosition.position.y),
+                                                start: position.position,
+                                                end: spousePosition.position,
                                                 type: .spouse
                                             )
                                             .stroke(Color.red, lineWidth: 2)
@@ -55,8 +55,8 @@ struct FamilyTreeVisualization: View {
                                         if let child = viewModel.nodes[childId],
                                            let childPosition = viewModel.nodePositions[childId] {
                                             ConnectionLine(
-                                                start: CGPoint(x: position.position.x, y: position.position.y),
-                                                end: CGPoint(x: childPosition.position.x, y: childPosition.position.y),
+                                                start: position.position,
+                                                end: childPosition.position,
                                                 type: .child
                                             )
                                             .stroke(Color.green, lineWidth: 2)
@@ -107,5 +107,3 @@ struct FamilyTreeVisualization: View {
         }
     }
 }
-
-

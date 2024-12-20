@@ -281,50 +281,24 @@ class UserProfileEditViewModel: ObservableObject {
                 }
                 
                 // Handle upload completion
-                uploadTask.observe(.success) { [weak self] _ in
-                    guard let self = self else {
-                        continuation.resume(throwing: ProfileError.unknown)
-                        return
-                    }
-                    
+                uploadTask.observe(.success) { _ in
                     Task {
                         do {
                             let downloadURL = try await photoRef.downloadURL()
-                            
-                            // Cache the image data and update UI
-                            try await self.updateProfileImageCache(userId: userId, imageData: imageData, url: downloadURL)
-                            
-                            // Log successful upload
-                            self.logger.info("Profile image uploaded successfully: \(downloadURL.absoluteString)")
-                            self.analytics.logProfilePhotoUpdate()
-                            
+                            await MainActor.run {
+                                self.profileImageURL = downloadURL
+                            }
                             continuation.resume(returning: downloadURL.absoluteString)
                         } catch {
-                            self.logger.error("Failed to get download URL: \(error.localizedDescription)")
-                            continuation.resume(throwing: ProfileError.downloadURLFailed)
+                            continuation.resume(throwing: error)
                         }
                     }
                 }
                 
                 // Handle upload failure
                 uploadTask.observe(.failure) { snapshot in
-                    if let error = snapshot.error as NSError? {
-                        self.logger.error("Upload failed: \(error.localizedDescription)")
-                        
-                        // Map Firebase errors to our ProfileError enum
-                        let mappedError: ProfileError
-                        switch error.code {
-                        case StorageErrorCode.quotaExceeded.rawValue:
-                            mappedError = .quotaExceeded
-                        case StorageErrorCode.unauthenticated.rawValue:
-                            mappedError = .unauthorized
-                        case StorageErrorCode.objectNotFound.rawValue:
-                            mappedError = .uploadFailed
-                        default:
-                            mappedError = .unknown
-                        }
-                        
-                        continuation.resume(throwing: mappedError)
+                    if let error = snapshot.error {
+                        continuation.resume(throwing: error)
                     } else {
                         continuation.resume(throwing: ProfileError.uploadFailed)
                     }

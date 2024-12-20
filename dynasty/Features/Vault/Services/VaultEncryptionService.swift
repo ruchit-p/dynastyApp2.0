@@ -52,7 +52,7 @@ class VaultEncryptionService {
         return (key, id)
     }
     
-    func encryptFile(data: Data, userId: String, keyId: String) throws -> Data {
+    func encryptFile(data: Data, userId: String, keyId: String) async throws -> Data {
         logger.info("Encrypting file for user: \(userId) with key: \(keyId)")
         
         guard !data.isEmpty else {
@@ -65,7 +65,7 @@ class VaultEncryptionService {
             if let cachedKey = encryptionKeys[keyId] {
                 key = cachedKey
             } else {
-                let keyData = try keychainHelper.loadEncryptionKey(for: keyId)
+                let keyData = try await keychainHelper.loadEncryptionKey(for: keyId)
                 key = SymmetricKey(data: keyData)
                 encryptionKeys[keyId] = key
             }

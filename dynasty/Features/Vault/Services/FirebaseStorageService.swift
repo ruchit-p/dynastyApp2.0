@@ -8,6 +8,7 @@ class FirebaseStorageService {
     private let storage = Storage.storage()
     private let db = FirestoreManager.shared.getDB()
     private let logger = Logger(subsystem: "com.dynasty.FirebaseStorageService", category: "Storage")
+    private let encryptionService = EncryptionService.shared
     
     // Use a serial queue to ensure thread safety for uploadTasks
     private let uploadQueue = DispatchQueue(label: "com.dynasty.FirebaseStorageService.uploadQueue")
@@ -73,7 +74,7 @@ class FirebaseStorageService {
         }
 
         logger.info("Starting upload for file: \(fileName) to path: \(fileRef.fullPath)")
-        let uploadTask = fileRef.putData(data, metadata: metadata)
+        let uploadTask = fileRef.putDataAsync(data, metadata: metadata)
 
         // Track the new upload task
         uploadQueue.sync {
@@ -127,7 +128,7 @@ class FirebaseStorageService {
 
         logger.info("Starting download from path: \(path)")
 
-        let downloadTask = fileRef.getData(maxSize: maxSize) { data, error in
+        let downloadTask = fileRef.getDataAsync(maxSize: maxSize) { data, error in
             if let error = error as NSError? {
                 self.logger.error("Failed to download encrypted data: \(error.localizedDescription)")
                 let vaultError = self.handleFirebaseStorageError(error) ?? VaultError.fileOperationFailed("Failed to download encrypted file: \(error.localizedDescription)")
@@ -188,6 +189,139 @@ class FirebaseStorageService {
             }
         }
         return VaultError.fileOperationFailed("Failed to perform storage operation: \(error.localizedDescription)")
+    }
+
+    func uploadEncryptedFile(
+        from fileURL: URL,
+        fileName: String,
+        userId: String,
+        mimeType: String,
+        encryptionKeyId: String,
+        parentFolderId: String?,
+        progressHandler: ((Double) -> Void)? = nil
+    ) async throws {
+        guard let encryptionKey = try await encryptionService.loadKey(for: encryptionKeyId) else {
+            logger.error("Encryption key not found for ID: \(encryptionKeyId)")
+            throw VaultError.encryptionFailed("Encryption key not found")
+        }
+
+        let encryptedFileURL: URL
+        do {
+            encryptedFileURL = try await encryptionService.encrypt(
+                fileURL: fileURL,
+                encryptionKey: encryptionKey,
+                keyId: encryptionKeyId
+            )
+        } catch {
+            logger.error("Encryption failed: \(error.localizedDescription)")
+            throw VaultError.encryptionFailed("File encryption failed: \(error.localizedDescription)")
+        }
+
+        let storageRef = storage.reference().child("users/\(userId)/vault/\(fileName)")
+        var uploadTask: StorageUploadTask?
+
+        do {
+            let metadata = StorageMetadata()
+            metadata.contentType = mimeType
+            
+            // Create and store the upload task
+            uploadTask = storageRef.putFile(from: encryptedFileURL, metadata: metadata)
+            
+            // Observe progress
+            uploadTask?.observe(.progress) { snapshot in
+                if let progress = snapshot.progress {
+                    let percentComplete = Double(progress.completedUnitCount) / Double(progress.totalUnitCount)
+                    logger.info("Upload progress: \(percentComplete * 100)%")
+                    DispatchQueue.main.async {
+                        progressHandler?(percentComplete)
+                    }
+                }
+            }
+            
+            // Wait for upload completion
+            _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<StorageMetadata, Error>) in
+                uploadTask?.observe(.success) { snapshot in
+                    if let metadata = snapshot.metadata {
+                        continuation.resume(returning: metadata)
+                    } else {
+                        continuation.resume(throwing: VaultError.fileOperationFailed("Upload completed but metadata is missing"))
+                    }
+                }
+                
+                uploadTask?.observe(.failure) { snapshot in
+                    if let error = snapshot.error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(throwing: VaultError.fileOperationFailed("Upload failed with unknown error"))
+                    }
+                }
+            }
+        } catch {
+            logger.error("Firebase Storage upload failed: \(error.localizedDescription)")
+            throw VaultError.fileOperationFailed("File upload failed: \(error.localizedDescription)")
+        }
+
+        // Clean up temporary encrypted file
+        do {
+            try FileManager.default.removeItem(at: encryptedFileURL)
+            logger.info("Temporary encrypted file removed at: \(encryptedFileURL.path)")
+        } catch {
+            logger.warning("Failed to remove temporary encrypted file at: \(encryptedFileURL.path) - \(error.localizedDescription)")
+        }
+
+        // Save metadata to Firestore
+        let metadata = VaultItemMetadata(
+            originalFileName: (fileURL.lastPathComponent as NSString).deletingPathExtension,
+            fileExtension: fileURL.pathExtension,
+            mimeType: mimeType,
+            sizeInBytes: try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0,
+            encryptionKeyId: encryptionKeyId,
+            uploadDate: Date()
+        )
+
+        let newItem = VaultItem(
+            id: fileName,
+            userId: userId,
+            title: metadata.originalFileName,
+            fileType: try determineFileType(from: fileURL),
+            metadata: metadata,
+            parentFolderId: parentFolderId,
+            isFavorite: false,
+            isDeleted: false,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+
+        do {
+            try await FirestoreDatabaseManager.shared.saveItem(newItem, for: userId)
+            logger.info("File metadata saved to Firestore for: \(fileName)")
+        } catch {
+            logger.error("Failed to save file metadata to Firestore: \(error.localizedDescription)")
+            throw VaultError.databaseOperationFailed("Failed to save file metadata")
+        }
+    }
+
+    private func determineFileType(from fileURL: URL) throws -> VaultItemType {
+        let fileExtension = fileURL.pathExtension.lowercased()
+        
+        switch fileExtension {
+        case "jpg", "jpeg", "png", "gif", "heic", "heif":
+            return .image
+        case "mov", "mp4", "m4v", "avi":
+            return .video
+        case "pdf":
+            return .document
+        case "doc", "docx":
+            return .document
+        case "xls", "xlsx":
+            return .spreadsheet
+        case "txt", "rtf":
+            return .text
+        case "zip", "rar", "7z":
+            return .archive
+        default:
+            return .other
+        }
     }
 }
 
