@@ -6,6 +6,25 @@ class AnalyticsService {
     
     private init() {}
     
+    // MARK: - Authentication Events
+    
+    func logSignIn(method: String) {
+        Analytics.logEvent("user_sign_in", parameters: [
+            "method": method
+        ])
+    }
+    
+    func logSignUp(method: String, hasReferral: Bool) {
+        Analytics.logEvent("user_sign_up", parameters: [
+            "method": method,
+            "has_referral": hasReferral as NSNumber
+        ])
+    }
+    
+    func logSignOut() {
+        Analytics.logEvent("user_sign_out", parameters: nil)
+    }
+    
     // MARK: - Profile Events
     
     func logProfileView() {
@@ -14,7 +33,8 @@ class AnalyticsService {
     
     func logProfileEdit(fields: [String]) {
         Analytics.logEvent("profile_edit", parameters: [
-            "edited_fields": fields.joined(separator: ",")
+            "edited_fields": fields.joined(separator: ","),
+            "field_count": fields.count as NSNumber
         ])
     }
     
@@ -28,7 +48,8 @@ class AnalyticsService {
         Analytics.logEvent("settings_change", parameters: [
             "category": category,
             "setting": setting,
-            "value": "\(value)"
+            "value": "\(value)",
+            "timestamp": Date().timeIntervalSince1970 as NSNumber
         ])
     }
     
@@ -60,8 +81,9 @@ class AnalyticsService {
         
         Analytics.logEvent("app_error", parameters: [
             "error_type": errorType,
-            "error_message": errorMessage,
-            "context": context
+            "error_message": errorMessage.prefix(100),
+            "context": context,
+            "timestamp": Date().timeIntervalSince1970 as NSNumber
         ])
     }
     
@@ -70,16 +92,24 @@ class AnalyticsService {
     func logOperationTime(operation: String, duration: TimeInterval) {
         Analytics.logEvent("operation_performance", parameters: [
             "operation": operation,
-            "duration_ms": Int(duration * 1000)
+            "duration_ms": Int(duration * 1000) as NSNumber
         ])
     }
     
     // MARK: - User Properties
     
     func setUserProperties(user: User) {
-        Analytics.setUserProperty(user.id, forName: "user_id")
-        Analytics.setUserProperty(user.isAdmin ? "admin" : "user", forName: "user_role")
-        Analytics.setUserProperty(user.canAddMembers ? "yes" : "no", forName: "can_add_members")
-        Analytics.setUserProperty(user.canEdit ? "yes" : "no", forName: "can_edit")
+        // Use dedicated method for user ID
+        Analytics.setUserID(user.id)
+        
+        // Set other user properties
+        Analytics.setUserProperty(user.role.rawValue, forName: "user_role")
+        Analytics.setUserProperty(user.canAddMembers ? "true" : "false", forName: "can_add_members")
+        Analytics.setUserProperty(user.canEdit ? "true" : "false", forName: "can_edit")
+        
+        // Add app version for tracking
+        if let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+            Analytics.setUserProperty(appVersion, forName: "app_version")
+        }
     }
 } 

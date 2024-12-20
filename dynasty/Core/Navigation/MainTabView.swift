@@ -37,7 +37,7 @@ struct MainTabView: View {
                 if let user = authManager.user,
                    let userId = user.id,
                    let treeId = user.familyTreeID {
-                    FamilyTreeView(treeId: treeId, userId: userId)
+                    FamilyTreeView(treeId: treeId)
                         .tabItem {
                             Image(systemName: "person.2.fill")
                             Text("Family Tree")

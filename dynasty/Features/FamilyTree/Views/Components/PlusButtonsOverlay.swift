@@ -6,6 +6,7 @@ struct PlusButtonsOverlay: View {
     @State private var showingAddFamilyMemberForm: Bool = false
     @State private var relationType: RelationType = .child
     let user: User?
+    @ObservedObject var viewModel: FamilyTreeViewModel
 
     var body: some View {
         GeometryReader { geometry in
@@ -100,13 +101,7 @@ struct PlusButtonsOverlay: View {
                 showAddButtons = false
             }
             .sheet(isPresented: $showingAddFamilyMemberForm) {
-                if let user = user {
-                    AddFamilyMemberForm(
-                        relationType: $relationType,
-                        selectedMember: FamilyMember(fromNode: selectedNode),
-                        user: user
-                    )
-                }
+                AddFamilyMemberForm(viewModel: viewModel)
             }
         }
     }

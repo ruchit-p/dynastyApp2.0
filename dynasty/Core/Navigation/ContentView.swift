@@ -17,7 +17,9 @@ struct ContentView: View {
         if authManager.isAuthenticated {
             MainTabView()
                 .onAppear {
-                    fetchUser()
+                    Task {
+                        await fetchUser()
+                    }
                 }
         } else {
             NavigationView {
@@ -26,36 +28,32 @@ struct ContentView: View {
         }
     }
 
-    private func fetchUser() {
+    private func fetchUser() async {
         guard let currentUser = authManager.user else {
             print("User is not authenticated.")
             return
         }
         let db = Firestore.firestore()
 
-        let userRef = db.collection(Constants.Firebase.usersCollection).document(currentUser.id!)
-        userRef.getDocument { document, error in
-            if let error = error {
-                print("Error fetching user document: \(error.localizedDescription)")
-                return
-            }
+        do {
+            let document = try await db.collection(Constants.Firebase.usersCollection)
+                .document(currentUser.id!)
+                .getDocument()
 
-            if let document = document, document.exists {
+            if document.exists {
                 // User document exists, verify collections
-                verifyUserCollections(userID: currentUser.id!)
+                await verifyUserCollections(userID: currentUser.id!)
             } else {
                 // User document does not exist, sign out the user
-                do {
-                    try authManager.signOut()
-                    print("User document does not exist, signing out")
-                } catch {
-                    print("Error signing out: \(error.localizedDescription)")
-                }
+                try await authManager.signOut()
+                print("User document does not exist, signing out")
             }
+        } catch {
+            print("Error fetching user document: \(error.localizedDescription)")
         }
     }
 
-    private func verifyUserCollections(userID: String) {
+    private func verifyUserCollections(userID: String) async {
         // Implement your verification logic here
         // For example, check if the user's family tree and other related collections exist
     }

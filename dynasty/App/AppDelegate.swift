@@ -3,6 +3,7 @@ import FirebaseCore
 import FirebaseFirestore
 import FirebaseAuth
 import FirebaseStorage
+import FirebaseAnalytics
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(
@@ -10,6 +11,16 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         FirebaseApp.configure()
+        
+        // Enable analytics data collection
+        Analytics.setAnalyticsCollectionEnabled(true)
+        
+        // Set default event parameters
+        Analytics.setDefaultEventParameters([
+            "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            "os_version": UIDevice.current.systemVersion
+        ])
+        
         return true
     }
     

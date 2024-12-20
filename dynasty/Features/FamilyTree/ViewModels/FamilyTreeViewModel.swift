@@ -13,6 +13,7 @@ class FamilyTreeViewModel: ObservableObject {
     @Published var isEditMode = false
     
     private let manager = FamilyTreeManager.shared
+    private let db = FirestoreManager.shared.getDB()
     private var cancellables = Set<AnyCancellable>()
     let treeId: String
     private let userId: String
@@ -23,22 +24,209 @@ class FamilyTreeViewModel: ObservableObject {
     init(treeId: String, userId: String) {
         self.treeId = treeId
         self.userId = userId
-        setupListeners()
+        Task {
+            await loadTreeData()
+        }
     }
     
-    private func setupListeners() {
-        // Listen for changes in the family tree members
-        manager.getMembers(for: treeId) { [weak self] result in
-            guard let self = self else { return }
-            
-            switch result {
-            case .success(let members):
-                self.nodes = members
-                self.calculateNodePositions()
-            case .failure(let error):
+    // MARK: - Node Operations
+    
+    func addMember(_ member: User, relationship: String? = nil) async throws {
+        // First add the member to the tree
+        try await manager.addMember(
+            email: member.email ?? "",
+            to: treeId,
+            relationship: relationship ?? "member"
+        )
+        await loadTreeData()
+    }
+    
+    func updateMember(_ node: FamilyTreeNode) async throws {
+        let updatedUser = User(
+            id: node.id,
+            email: node.email,
+            firstName: node.firstName,
+            lastName: node.lastName,
+            dateOfBirth: node.dateOfBirth,
+            gender: node.gender,
+            phoneNumber: node.phoneNumber,
+            country: nil,
+            photoURL: node.photoURL,
+            familyTreeID: treeId,
+            historyBookID: nil,
+            parentIds: node.parentIds,
+            childIds: node.childrenIds,
+            spouseId: node.spouseIds.first,
+            siblingIds: [],
+            role: .member,
+            canAddMembers: node.canEdit,
+            canEdit: node.canEdit
+        )
+        try await manager.updateMember(updatedUser, in: treeId)
+        await loadTreeData()
+    }
+    
+    func updateMember(_ user: User) async throws {
+        try await manager.updateMember(user, in: treeId)
+        await loadTreeData()
+    }
+    
+    func removeMember(_ memberId: String) async throws {
+        try await manager.removeMember(memberId, from: treeId)
+        await loadTreeData()
+    }
+    
+    func addMember(
+        email: String,
+        to treeId: String,
+        relationship: String
+    ) async throws {
+        try await manager.addMember(email: email, to: treeId, relationship: relationship)
+        await loadTreeData()
+    }
+    
+    // MARK: - Relationship Operations
+    
+    func addParentChildRelationship(parentId: String, childId: String) async throws {
+        try await manager.addMember(
+            email: "",  // This needs to be provided by the caller
+            to: treeId,
+            relationship: "child"
+        )
+        await loadTreeData()
+    }
+    
+    func addSpouseRelationship(person1Id: String, person2Id: String) async throws {
+        try await manager.addMember(
+            email: "",  // This needs to be provided by the caller
+            to: treeId,
+            relationship: "spouse"
+        )
+        await loadTreeData()
+    }
+    
+    // MARK: - Data Loading
+    
+    func loadTreeData() async {
+        isLoading = true
+        defer { isLoading = false }
+        
+        do {
+            let members = try await manager.fetchFamilyTreeMembers(familyTreeId: treeId)
+            await MainActor.run {
+                self.nodes = Dictionary(uniqueKeysWithValues: members.compactMap { member -> (String, FamilyTreeNode)? in
+                    guard let id = member.id else { return nil }
+                    return (id, FamilyTreeNode(from: member))
+                })
+                calculateNodePositions()
+            }
+        } catch {
+            await MainActor.run {
                 self.error = error
             }
         }
+    }
+    
+    private func updateRelationships(for member: FamilyTreeNode, batch: WriteBatch) async throws {
+        // Remove from parents' children
+        for parentId in member.parentIds {
+            if var parent = nodes[parentId] {
+                parent.childrenIds.removeAll { $0 == member.id }
+                let parentRef = db.collection(Constants.Firebase.familyTreesCollection)
+                    .document(treeId)
+                    .collection("members")
+                    .document(parentId)
+                try batch.setData(from: parent, forDocument: parentRef)
+            }
+        }
+        
+        // Remove from spouse's spouses
+        for spouseId in member.spouseIds {
+            if var spouse = nodes[spouseId] {
+                spouse.spouseIds.removeAll { $0 == member.id }
+                let spouseRef = db.collection(Constants.Firebase.familyTreesCollection)
+                    .document(treeId)
+                    .collection("members")
+                    .document(spouseId)
+                try batch.setData(from: spouse, forDocument: spouseRef)
+            }
+        }
+        
+        // Remove from children's parents
+        let childrenWithThisParent = nodes.values.filter { $0.parentIds.contains(member.id) }
+        for var child in childrenWithThisParent {
+            child.parentIds.removeAll { $0 == member.id }
+            let childRef = db.collection(Constants.Firebase.familyTreesCollection)
+                .document(treeId)
+                .collection("members")
+                .document(child.id)
+            try batch.setData(from: child, forDocument: childRef)
+        }
+    }
+    
+    // MARK: - Family Groups
+    
+    func getFamilyGroups(for userId: String) -> FamilyGroups {
+        guard let user = nodes[userId] else { return FamilyGroups() }
+        
+        let parents = user.parentIds.compactMap { parentId -> User? in
+            guard let parent = nodes[parentId] else { return nil }
+            return User(from: parent)
+        }
+        
+        let spouse = user.spouseIds.first.flatMap { spouseId -> User? in
+            guard let spouse = nodes[spouseId] else { return nil }
+            return User(from: spouse)
+        }
+        
+        let children = user.childrenIds.compactMap { childId -> User? in
+            guard let child = nodes[childId] else { return nil }
+            return User(from: child)
+        }
+        
+        let siblings = nodes.values
+            .filter { node in
+                !node.parentIds.isEmpty && 
+                !Set(node.parentIds).isDisjoint(with: Set(user.parentIds)) &&
+                node.id != user.id
+            }
+            .map { User(from: $0) }
+        
+        return FamilyGroups(
+            parents: parents,
+            spouse: spouse,
+            children: children,
+            siblings: siblings
+        )
+    }
+    
+    // MARK: - Helper Methods
+    
+    func createNewNode(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: Date?,
+        gender: Gender,
+        email: String?,
+        phoneNumber: String?
+    ) -> FamilyTreeNode {
+        FamilyTreeNode(
+            id: UUID().uuidString,
+            firstName: firstName,
+            lastName: lastName,
+            dateOfBirth: dateOfBirth,
+            gender: gender,
+            email: email,
+            phoneNumber: phoneNumber,
+            photoURL: nil,
+            parentIds: [],
+            childrenIds: [],
+            spouseIds: [],
+            generation: 0,
+            isRegisteredUser: false,
+            canEdit: true,
+            updatedAt: Timestamp()
+        )
     }
     
     private func calculateNodePositions() {
@@ -90,7 +278,7 @@ class FamilyTreeViewModel: ObservableObject {
                 for (index, nodeId) in nodesInLevel.enumerated() {
                     let x = startX + CGFloat(index) * nodeWidth
                     let y = CGFloat(level) * levelHeight
-                    newPositions[nodeId] = NodePosition(x: x, y: y)
+                    newPositions[nodeId] = NodePosition(position: CGPoint(x: x, y: y))
                 }
             }
         }
@@ -98,133 +286,20 @@ class FamilyTreeViewModel: ObservableObject {
         nodePositions = newPositions
     }
     
-    // MARK: - Node Operations
-    
-    func addMember(_ member: FamilyTreeNode) async throws {
-        try await manager.addMember(member, to: treeId)
-        setupListeners()
-    }
-    
-    func updateMember(_ member: FamilyTreeNode) async throws {
-        try await manager.updateMember(member, in: treeId)
-        setupListeners()
-    }
-    
-    func deleteMember(_ memberId: String) async throws {
-        // First, remove references to this member from other nodes
-        try await manager.removeMember(memberId, from: treeId)
-        setupListeners()
-    }
-    
-    func addMember(
-        email: String,
-        firstName: String,
-        lastName: String,
-        dateOfBirth: Date,
-        gender: String,
-        relationship: String
-    ) async {
-        isLoading = true
-        error = nil
-        
-        do {
-            let newMember = FamilyTreeNode(
-                id: UUID().uuidString,
-                firstName: firstName,
-                lastName: lastName,
-                dateOfBirth: dateOfBirth,
-                gender: Gender(rawValue: gender) ?? .other,
-                email: email,
-                phoneNumber: nil,
-                photoURL: nil,
-                parentIds: [],
-                childrenIds: [],
-                spouseIds: [],
-                generation: 0,
-                isRegisteredUser: false,
-                canEdit: true,
-                updatedAt: Timestamp()
-            )
-            
-            try await manager.addMember(newMember, treeId: treeId, userId: userId)
-            
-        } catch {
-            self.error = error
-        }
-        
-        isLoading = false
-    }
-    
-    // MARK: - Relationship Operations
-    
-    func addParentChild(parentId: String, childId: String) async throws {
-        try await manager.addParentChild(parentId: parentId, childId: childId, in: treeId)
-        setupListeners()
-    }
-    
-    func addSpouse(person1Id: String, person2Id: String) async throws {
-        try await manager.addSpouse(person1Id: person1Id, person2Id: person2Id, in: treeId)
-        setupListeners()
-    }
-    
-    // MARK: - Data Loading
-    
-    func loadTreeData() async throws {
+    func createFamilyTree() async throws {
         isLoading = true
         defer { isLoading = false }
-        
-        let members = try await manager.getMembers(for: treeId)
-        await MainActor.run {
-            self.nodes = members
-        }
+        try await manager.createFamilyTree()
+        await loadTreeData()
     }
     
-    private func updateRelationships(for member: FamilyTreeNode, batch: WriteBatch) async throws {
-        // Remove from parents' children
-        for parentId in member.parentIds {
-            if var parent = nodes[parentId] {
-                parent.childrenIds.removeAll { $0 == member.id }
-                let parentRef = db.collection("familyTrees")
-                    .document(treeId)
-                    .collection("members")
-                    .document(parentId)
-                try batch.setData(from: parent, forDocument: parentRef)
-            }
-        }
+    struct NodePosition {
+        let position: CGPoint
         
-        // Remove from spouse's spouses
-        for spouseId in member.spouseIds {
-            if var spouse = nodes[spouseId] {
-                spouse.spouseIds.removeAll { $0 == member.id }
-                let spouseRef = db.collection("familyTrees")
-                    .document(treeId)
-                    .collection("members")
-                    .document(spouseId)
-                try batch.setData(from: spouse, forDocument: spouseRef)
-            }
+        init(position: CGPoint) {
+            self.position = position
         }
-        
-        // Remove from children's parents
-        for childId in member.childrenIds {
-            if var child = nodes[childId] {
-                child.parentIds.removeAll { $0 == member.id }
-                let childRef = db.collection("familyTrees")
-                    .document(treeId)
-                    .collection("members")
-                    .document(childId)
-                try batch.setData(from: child, forDocument: childRef)
-            }
-        }
-        
-        // Delete the member
-        let memberRef = db.collection("familyTrees")
-            .document(treeId)
-            .collection("members")
-            .document(member.id)
-        batch.deleteDocument(memberRef)
     }
-    
-    // MARK: - Family Groups
     
     struct FamilyGroups {
         var parents: [User]
@@ -244,91 +319,4 @@ class FamilyTreeViewModel: ObservableObject {
             self.siblings = siblings
         }
     }
-    
-    func getFamilyGroups(for userId: String) -> FamilyGroups {
-        guard let user = nodes[userId] else { return FamilyGroups() }
-        
-        let parents = user.parentIds.compactMap { parentId -> User? in
-            guard let parent = nodes[parentId] else { return nil }
-            return User(from: parent)
-        }
-        
-        let spouse = user.spouseIds.first.flatMap { spouseId -> User? in
-            guard let spouse = nodes[spouseId] else { return nil }
-            return User(from: spouse)
-        }
-        
-        let children = user.childrenIds.compactMap { childId -> User? in
-            guard let child = nodes[childId] else { return nil }
-            return User(from: child)
-        }
-        
-        let siblings = user.siblingIds.compactMap { siblingId -> User? in
-            guard let sibling = nodes[siblingId] else { return nil }
-            return User(from: sibling)
-        }
-        
-        return FamilyGroups(
-            parents: parents,
-            spouse: spouse,
-            children: children,
-            siblings: siblings
-        )
-    }
-    
-    // MARK: - Helper Methods
-    
-    func getCurrentUserNode() -> FamilyTreeNode? {
-        // If the nodes are empty, create a temporary node for the current user
-        if nodes.isEmpty {
-            return FamilyTreeNode(
-                id: userId,
-                firstName: "You",  // This will be updated when we load the actual data
-                lastName: "",
-                dateOfBirth: nil,
-                gender: .unknown,
-                email: nil,
-                phoneNumber: nil,
-                photoURL: nil,
-                parentIds: [],
-                spouseIds: [],
-                childrenIds: [],
-                isRegisteredUser: true,
-                canEdit: true,
-                updatedAt: Timestamp()
-            )
-        }
-        
-        // Otherwise, find the user's node in the existing nodes
-        return nodes[userId]
-    }
-    
-    func canEdit(_ nodeId: String) -> Bool {
-        guard let node = nodes[nodeId] else { return false }
-        return node.canEdit
-    }
-    
-    func getNode(_ id: String) -> FamilyTreeNode? {
-        nodes[id]
-    }
-    
-    func getParents(_ nodeId: String) -> [FamilyTreeNode] {
-        guard let node = nodes[nodeId] else { return [] }
-        return node.parentIds.compactMap { nodes[$0] }
-    }
-    
-    func getSpouses(_ nodeId: String) -> [FamilyTreeNode] {
-        guard let node = nodes[nodeId] else { return [] }
-        return node.spouseIds.compactMap { nodes[$0] }
-    }
-    
-    func getChildren(_ nodeId: String) -> [FamilyTreeNode] {
-        guard let node = nodes[nodeId] else { return [] }
-        return node.childrenIds.compactMap { nodes[$0] }
-    }
-}
-
-struct NodePosition {
-    let x: CGFloat
-    let y: CGFloat
 }

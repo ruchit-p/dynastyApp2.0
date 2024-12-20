@@ -27,7 +27,7 @@ struct UserProfileEditView: View {
         self._viewModel = StateObject(wrappedValue: UserProfileEditViewModel(user: currentUser))
         self._firstName = State(initialValue: currentUser.firstName ?? "")
         self._lastName = State(initialValue: currentUser.lastName ?? "")
-        self._email = State(initialValue: currentUser.email)
+        self._email = State(initialValue: currentUser.email ?? "")
         self._phoneNumber = State(initialValue: currentUser.phoneNumber ?? "")
     }
     
@@ -293,21 +293,24 @@ struct CustomTextField: View {
 #Preview {
     let previewUser = User(
         id: "preview",
-        displayName: "John Doe",
         email: "john@example.com",
-        dateOfBirth: Date(),
         firstName: "John",
         lastName: "Doe",
+        dateOfBirth: Date(),
+        gender: nil,
         phoneNumber: "+1234567890",
+        country: nil,
+        photoURL: nil,
         familyTreeID: nil,
         historyBookID: nil,
         parentIds: [],
-        childrenIds: [],
-        isAdmin: false,
-        canAddMembers: true,
-        canEdit: true,
-        photoURL: nil,
-        createdAt: Timestamp(),
+        childIds: [],
+        spouseId: nil,
+        siblingIds: [],
+        role: .member,
+        canAddMembers: false,
+        canEdit: false,
+        createdAt: nil,
         updatedAt: nil
     )
     

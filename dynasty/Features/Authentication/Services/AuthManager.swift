@@ -63,6 +63,7 @@ class AuthManager: ObservableObject {
     private let db: Firestore
     private let auth: Auth
     private let logger = Logger(subsystem: "com.dynasty.AuthManager", category: "Authentication")
+    private let analytics = AnalyticsService.shared
     
     enum AuthState {
         case unknown
@@ -118,31 +119,24 @@ class AuthManager: ObservableObject {
                     self.isAuthenticated = false
                     self.authState = .notAuthenticated
                 }
-                throw AuthError.userNotFound
+                return
             }
             
-            do {
-                let userData = try document.data(as: User.self)
-                logger.info("Successfully decoded user data")
+            let userData = try document.data(as: User.self)
+            
+            await MainActor.run {
+                self.user = userData
+                self.isAuthenticated = true
+                self.authState = .authenticated
                 
-                await MainActor.run {
-                    self.user = userData
-                    self.isAuthenticated = true
-                    self.authState = .authenticated
-                    logger.info("Updated auth state: authenticated")
-                }
-            } catch {
-                logger.error("Failed to decode user data: \(error.localizedDescription)")
-                throw AuthError.documentCreationFailed("Failed to decode user data")
+                // Set analytics user properties when user data is loaded
+                self.analytics.setUserProperties(user: userData)
             }
+            
         } catch {
             logger.error("Failed to load user data: \(error.localizedDescription)")
-            await MainActor.run {
-                self.user = nil
-                self.isAuthenticated = false
-                self.authState = .notAuthenticated
-            }
-            throw AuthError.databaseError("Failed to load user data")
+            analytics.logError(error, context: "load_user_data")
+            throw error
         }
     }
     
@@ -160,8 +154,10 @@ class AuthManager: ObservableObject {
             logger.info("Email sign in successful")
             UserDefaults.standard.set(email, forKey: "lastSignInEmail")
             try await loadUserData(userId: result.user.uid)
+            analytics.logSignIn(method: "email")
         } catch {
             logger.error("Sign in failed: \(error.localizedDescription)")
+            analytics.logError(error, context: "sign_in_email")
             throw mapFirebaseError(error)
         }
     }
@@ -181,20 +177,23 @@ class AuthManager: ObservableObject {
             // Step 2: Initialize user data
             var userData = User(
                 id: userId,
-                displayName: "\(firstName) \(lastName)",
                 email: email,
-                dateOfBirth: dateOfBirth,
                 firstName: firstName,
                 lastName: lastName,
+                dateOfBirth: dateOfBirth,
+                gender: nil,
                 phoneNumber: phoneNumber,
+                country: nil,
+                photoURL: nil,
                 familyTreeID: nil,
                 historyBookID: nil,
                 parentIds: [],
-                childrenIds: [],
-                isAdmin: true,
+                childIds: [],
+                spouseId: nil,
+                siblingIds: [],
+                role: .member,
                 canAddMembers: true,
                 canEdit: true,
-                photoURL: nil,
                 createdAt: Timestamp(),
                 updatedAt: Timestamp()
             )
@@ -265,27 +264,28 @@ class AuthManager: ObservableObject {
             }
 
             logger.info("User, Family Tree, and History Book created successfully.")
+            AnalyticsService.shared.logSignUp(method: "email", hasReferral: referralCode != nil)
 
         } catch {
             logger.error("Sign-up failed: \(error.localizedDescription)")
+            analytics.logError(error, context: "sign_up_email")
             throw mapFirebaseError(error)
         }
     }
     
-    func signOut() throws {
-        logger.info("Attempting sign out")
+    func signOut() async throws {
         do {
-            try Auth.auth().signOut()
-            UserDefaults.standard.removeObject(forKey: "lastSignInEmail")
-            logger.info("Cleared last sign in email")
-            
-            self.isAuthenticated = false
-            self.user = nil
-            self.authState = .notAuthenticated
-            logger.info("Sign out successful")
+            try auth.signOut()
+            await MainActor.run {
+                self.user = nil
+                self.isAuthenticated = false
+                self.authState = .notAuthenticated
+            }
+            analytics.logSignOut()
         } catch {
             logger.error("Sign out failed: \(error.localizedDescription)")
-            throw AuthError.signOutError(error.localizedDescription)
+            analytics.logError(error, context: "sign_out")
+            throw error
         }
     }
     
@@ -323,22 +323,25 @@ class AuthManager: ObservableObject {
                     // Create new user with Apple data
                     var userData = User(
                         id: firebaseUser.uid,
-                        displayName: "\(givenName) \(familyName)".trimmingCharacters(in: .whitespaces),
                         email: firebaseUser.email ?? "",
-                        dateOfBirth: Date(),
                         firstName: givenName,
                         lastName: familyName,
+                        dateOfBirth: nil,
+                        gender: nil,
                         phoneNumber: "",
+                        country: nil,
+                        photoURL: nil,
                         familyTreeID: nil,
                         historyBookID: nil,
                         parentIds: [],
-                        childrenIds: [],
-                        isAdmin: true,
-                        canAddMembers: true,
-                        canEdit: true,
-                        photoURL: nil,
-                        createdAt: Timestamp(),
-                        updatedAt: Timestamp()
+                        childIds: [],
+                        spouseId: nil,
+                        siblingIds: [],
+                        role: .member,
+                        canAddMembers: false,
+                        canEdit: false,
+                        createdAt: nil,
+                        updatedAt: nil
                     )
                     
                     // Create family tree and history book for new user
@@ -376,7 +379,7 @@ class AuthManager: ObservableObject {
                         firstName: givenName,
                         lastName: familyName,
                         email: firebaseUser.email ?? "",
-                        dateOfBirth: Date(),
+                        dateOfBirth: nil,
                         isRegisteredUser: true,
                         updatedAt: Timestamp()
                     )

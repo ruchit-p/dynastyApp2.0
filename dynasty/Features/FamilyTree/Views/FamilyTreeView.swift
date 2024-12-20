@@ -7,7 +7,7 @@ struct FamilyTreeView: View {
     @State private var showingAddMemberSheet = false
     @State private var showingErrorAlert = false
     
-    init(treeId: String? = nil) {
+    init(treeId: String) {
         let userId = Auth.auth().currentUser?.uid ?? ""
         _viewModel = StateObject(wrappedValue: FamilyTreeViewModel(treeId: treeId, userId: userId))
     }
@@ -17,22 +17,32 @@ struct FamilyTreeView: View {
             ZStack {
                 if viewModel.isLoading {
                     ProgressView("Loading family tree...")
-                } else if viewModel.members.isEmpty {
+                } else if viewModel.nodes.isEmpty {
                     EmptyFamilyTreeView(viewModel: viewModel)
                 } else {
                     ScrollView([.horizontal, .vertical]) {
                         ZStack {
                             // Connection lines
-                            ConnectionLinesView(familyGroups: viewModel.familyGroups)
+                            ConnectionLinesView(viewModel: viewModel)
                             
                             // Family members
                             FamilyMembersLayout(
-                                familyGroups: viewModel.familyGroups,
-                                selectedMember: $viewModel.selectedMember,
-                                onAddParent: { viewModel.showingAddMemberSheet = true },
-                                onAddSpouse: { viewModel.showingAddMemberSheet = true },
-                                onAddChild: { viewModel.showingAddMemberSheet = true }
+                                viewModel: viewModel,
+                                onAddParent: { showingAddMemberSheet = true },
+                                onAddSpouse: { showingAddMemberSheet = true },
+                                onAddChild: { showingAddMemberSheet = true }
                             )
+                            
+                            if let selectedId = viewModel.selectedNodeId,
+                               let selectedNode = viewModel.nodes[selectedId] {
+                                PlusButtonsOverlay(
+                                    viewModel: viewModel,
+                                    onAddParent: { showingAddMemberSheet = true },
+                                    onAddSpouse: { showingAddMemberSheet = true },
+                                    onAddChild: { showingAddMemberSheet = true }
+                                )
+                                .position(viewModel.nodePositions[selectedId]?.position ?? .zero)
+                            }
                         }
                         .frame(minWidth: UIScreen.main.bounds.width * 1.5,
                                minHeight: UIScreen.main.bounds.height)
@@ -48,8 +58,9 @@ struct FamilyTreeView: View {
                             Label("Add Family Member", systemImage: "person.badge.plus")
                         }
                         
-                        if let currentUser = viewModel.members.first(where: { $0.id == Auth.auth().currentUser?.uid }),
-                           currentUser.isAdmin {
+                        if let currentUserId = Auth.auth().currentUser?.uid,
+                           let currentUser = viewModel.nodes[currentUserId],
+                           currentUser.canAddMembers {
                             Button(action: { /* Show admin panel */ }) {
                                 Label("Manage Tree", systemImage: "gear")
                             }
@@ -62,15 +73,16 @@ struct FamilyTreeView: View {
             .sheet(isPresented: $showingAddMemberSheet) {
                 AddFamilyMemberForm(viewModel: viewModel)
             }
-            .sheet(item: $viewModel.selectedMember) { member in
-                MemberDetailsView(member: member, viewModel: viewModel)
-            }
-            .alert("Error", isPresented: $showingErrorAlert) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                if let error = viewModel.error {
-                    Text(error.localizedDescription)
+            .sheet(item: $viewModel.selectedNodeId.map { IdentifiableString(id: $0) }) { nodeId in
+                if let node = viewModel.nodes[nodeId.id] {
+                    MemberDetailsView(member: node, viewModel: viewModel)
                 }
+            }
+            .alert("Error", isPresented: Binding(
+                get: { viewModel.error != nil },
+                set: { if !$0 { viewModel.error = nil } }
+            )) {
+                Text(viewModel.error?.localizedDescription ?? "Unknown error")
             }
         }
     }
@@ -99,7 +111,7 @@ struct EmptyFamilyTreeView: View {
             
             Button(action: {
                 Task {
-                    await viewModel.createFamilyTree()
+                    try? await viewModel.manager.createFamilyTree()
                 }
             }) {
                 Text("Create Family Tree")
@@ -116,144 +128,60 @@ struct EmptyFamilyTreeView: View {
 }
 
 struct ConnectionLinesView: View {
-    let familyGroups: FamilyTreeViewModel.FamilyGroups
+    let viewModel: FamilyTreeViewModel
     
     var body: some View {
         ZStack {
             // Parent connections
-            ForEach(familyGroups.parents) { parent in
-                ConnectionLine(from: parent, to: familyGroups.spouse ?? parent)
+            ForEach(Array(viewModel.nodes.values)) { node in
+                if !node.parentIds.isEmpty {
+                    ForEach(node.parentIds, id: \.self) { parentId in
+                        if let parent = viewModel.nodes[parentId] {
+                            ConnectionLine(
+                                start: viewModel.nodePositions[parent.id]?.center ?? .zero,
+                                end: viewModel.nodePositions[node.id]?.center ?? .zero,
+                                type: .parent
+                            )
+                        }
+                    }
+                }
             }
             
-            // Spouse connection
-            if let spouse = familyGroups.spouse {
-                ConnectionLine(from: spouse, to: spouse)
-                    .stroke(style: StrokeStyle(lineWidth: 2, dash: [5]))
-            }
-            
-            // Children connections
-            ForEach(familyGroups.children) { child in
-                ConnectionLine(from: familyGroups.spouse ?? child, to: child)
-            }
-            
-            // Sibling connections
-            ForEach(familyGroups.siblings) { sibling in
-                ConnectionLine(from: sibling, to: sibling)
-                    .stroke(style: StrokeStyle(lineWidth: 1, dash: [3]))
+            // Spouse connections
+            ForEach(Array(viewModel.nodes.values)) { node in
+                if let spouseId = node.spouseIds.first,
+                   let spouse = viewModel.nodes[spouseId] {
+                    ConnectionLine(
+                        start: viewModel.nodePositions[node.id]?.center ?? .zero,
+                        end: viewModel.nodePositions[spouseId]?.center ?? .zero,
+                        type: .spouse
+                    )
+                }
             }
         }
     }
 }
 
 struct FamilyMembersLayout: View {
-    let familyGroups: FamilyTreeViewModel.FamilyGroups
-    @Binding var selectedMember: User?
+    let viewModel: FamilyTreeViewModel
     let onAddParent: () -> Void
     let onAddSpouse: () -> Void
     let onAddChild: () -> Void
     
     var body: some View {
-        VStack(spacing: 60) {
-            // Parents layer
-            HStack(spacing: 40) {
-                ForEach(familyGroups.parents) { parent in
-                    FamilyMemberNode(member: parent, isSelected: parent.id == selectedMember?.id) {
-                        selectedMember = parent
-                    }
-                }
-                
-                if familyGroups.parents.count < 2 {
-                    AddMemberButton(action: onAddParent, label: "Add Parent")
-                }
-            }
-            
-            // Current user and spouse layer
-            HStack(spacing: 40) {
-                if let spouse = familyGroups.spouse {
-                    FamilyMemberNode(member: spouse, isSelected: spouse.id == selectedMember?.id) {
-                        selectedMember = spouse
-                    }
-                } else {
-                    AddMemberButton(action: onAddSpouse, label: "Add Spouse")
-                }
-            }
-            
-            // Children layer
-            HStack(spacing: 40) {
-                ForEach(familyGroups.children) { child in
-                    FamilyMemberNode(member: child, isSelected: child.id == selectedMember?.id) {
-                        selectedMember = child
-                    }
-                }
-                
-                AddMemberButton(action: onAddChild, label: "Add Child")
-            }
-        }
-    }
-}
-
-struct FamilyMemberNode: View {
-    let member: User
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            VStack {
-                if let photoURL = member.photoURL {
-                    AsyncImage(url: URL(string: photoURL)) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        ProgressView()
-                    }
-                    .frame(width: 60, height: 60)
-                    .clipShape(Circle())
-                } else {
-                    Image(systemName: "person.circle.fill")
-                        .resizable()
-                        .frame(width: 60, height: 60)
-                        .foregroundColor(.blue)
-                }
-                
-                Text(member.firstName ?? "Unknown")
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
-            }
-            .padding()
-            .background(Color(.systemBackground))
-            .cornerRadius(10)
-            .shadow(radius: isSelected ? 5 : 2)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+        ForEach(Array(viewModel.nodes.values)) { node in
+            FamilyMemberNodeView(
+                member: node,
+                isSelected: viewModel.selectedNodeId == node.id,
+                action: { viewModel.selectedNodeId = node.id }
             )
+            .position(viewModel.nodePositions[node.id]?.center ?? .zero)
         }
     }
 }
 
-struct AddMemberButton: View {
-    let action: () -> Void
-    let label: String
-    
-    var body: some View {
-        Button(action: action) {
-            VStack {
-                Image(systemName: "person.badge.plus")
-                    .font(.system(size: 30))
-                    .foregroundColor(.blue)
-                
-                Text(label)
-                    .font(.caption)
-                    .foregroundColor(.blue)
-            }
-            .frame(width: 80, height: 80)
-            .background(Color(.systemBackground))
-            .cornerRadius(10)
-            .shadow(radius: 2)
-        }
-    }
+struct IdentifiableString: Identifiable {
+    let id: String
 }
 
 struct FamilyTreeView_Previews: PreviewProvider {

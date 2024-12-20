@@ -22,15 +22,15 @@ struct FamilyTreeVisualization: View {
                             ProgressView("Loading family tree...")
                         } else {
                             // Drawing connection lines
-                            ForEach(Array(viewModel.nodes.values)) { node in
+                            ForEach(Array(viewModel.nodes.values), id: \.id) { node in
                                 if let position = viewModel.nodePositions[node.id] {
                                     // Parent connections
                                     ForEach(node.parentIds, id: \.self) { parentId in
                                         if let parent = viewModel.nodes[parentId],
                                            let parentPosition = viewModel.nodePositions[parentId] {
                                             ConnectionLine(
-                                                start: CGPoint(x: parentPosition.x, y: parentPosition.y),
-                                                end: CGPoint(x: position.x, y: position.y),
+                                                start: CGPoint(x: parentPosition.position.x, y: parentPosition.position.y),
+                                                end: CGPoint(x: position.position.x, y: position.position.y),
                                                 type: .parent
                                             )
                                             .stroke(Color.blue, lineWidth: 2)
@@ -42,18 +42,31 @@ struct FamilyTreeVisualization: View {
                                         if let spouse = viewModel.nodes[spouseId],
                                            let spousePosition = viewModel.nodePositions[spouseId] {
                                             ConnectionLine(
-                                                start: CGPoint(x: position.x, y: position.y),
-                                                end: CGPoint(x: spousePosition.x, y: spousePosition.y),
+                                                start: CGPoint(x: position.position.x, y: position.position.y),
+                                                end: CGPoint(x: spousePosition.position.x, y: spousePosition.position.y),
                                                 type: .spouse
                                             )
                                             .stroke(Color.red, lineWidth: 2)
                                         }
                                     }
+                                    
+                                    // Children connections
+                                    ForEach(node.childrenIds, id: \.self) { childId in
+                                        if let child = viewModel.nodes[childId],
+                                           let childPosition = viewModel.nodePositions[childId] {
+                                            ConnectionLine(
+                                                start: CGPoint(x: position.position.x, y: position.position.y),
+                                                end: CGPoint(x: childPosition.position.x, y: childPosition.position.y),
+                                                type: .child
+                                            )
+                                            .stroke(Color.green, lineWidth: 2)
+                                        }
+                                    }
                                 }
                             }
                             
-                            // Drawing family member nodes
-                            ForEach(Array(viewModel.nodes.values)) { node in
+                            // Drawing member nodes
+                            ForEach(Array(viewModel.nodes.values), id: \.id) { node in
                                 if let position = viewModel.nodePositions[node.id] {
                                     FamilyMemberNodeView(
                                         member: node,
@@ -63,7 +76,7 @@ struct FamilyTreeVisualization: View {
                                             showingMemberSettings = true
                                         }
                                     )
-                                    .position(x: position.x, y: position.y)
+                                    .position(position.position)
                                 }
                             }
                         }
@@ -74,43 +87,25 @@ struct FamilyTreeVisualization: View {
                 .gesture(
                     MagnificationGesture()
                         .onChanged { value in
-                            scale = value
-                        }
-                        .onEnded { _ in
-                            scale = 1.0
+                            scale = value.magnitude
                         }
                 )
-                
-                // Edit Mode Toggle
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            viewModel.isEditMode.toggle()
-                        }) {
-                            Image(systemName: viewModel.isEditMode ? "pencil.circle.fill" : "pencil.circle")
-                                .font(.system(size: 24))
-                                .padding()
-                                .background(Color.white)
-                                .clipShape(Circle())
-                                .shadow(radius: 3)
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            offset = value.translation
                         }
-                        .padding()
-                    }
-                }
+                )
             }
         }
         .sheet(isPresented: $showingMemberSettings) {
-            if let selectedMember = selectedMember {
-                let familyMember = FamilyMember(fromNode: selectedMember)
-                MemberSettingsView(
-                    member: familyMember,
-                    familyTreeID: viewModel.treeId,
-                    isAdmin: .constant(viewModel.nodes[viewModel.treeId]?.isRegisteredUser ?? false),
-                    canAddMembers: .constant(false)
-                )
+            if let member = selectedMember {
+                NavigationView {
+                    MemberDetailsView(node: member, viewModel: viewModel)
+                }
             }
         }
     }
 }
+
+

@@ -52,6 +52,24 @@ struct FamilyTreeNode: Identifiable, Codable, Equatable {
         self.updatedAt = updatedAt
     }
     
+    init(from user: User) {
+        self.id = user.id ?? UUID().uuidString
+        self.firstName = user.firstName ?? ""
+        self.lastName = user.lastName ?? ""
+        self.dateOfBirth = user.dateOfBirth
+        self.gender = user.gender ?? .other
+        self.email = user.email
+        self.phoneNumber = user.phoneNumber
+        self.photoURL = user.photoURL
+        self.parentIds = user.parentIds
+        self.childrenIds = user.childIds
+        self.spouseIds = [user.spouseId].compactMap { $0 }
+        self.generation = 0  // Default value, can be calculated later
+        self.isRegisteredUser = user.isRegisteredUser
+        self.canEdit = user.canEdit
+        self.updatedAt = user.updatedAt ?? Timestamp()
+    }
+    
     var isRoot: Bool {
         parentIds.isEmpty
     }
@@ -93,8 +111,8 @@ extension FamilyTreeNode {
             phoneNumber: "+1234567890",
             photoURL: nil,
             parentIds: [],
-            spouseIds: [],
             childrenIds: [],
+            spouseIds: [],
             generation: 0,
             isRegisteredUser: true,
             canEdit: true,

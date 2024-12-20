@@ -10,7 +10,7 @@ struct AddFamilyMemberForm: View {
     @State private var firstName = ""
     @State private var lastName = ""
     @State private var dateOfBirth = Date()
-    @State private var gender = "unknown"
+    @State private var selectedGender = Gender.other
     @State private var relationship = "child"
     @State private var showingError = false
     
@@ -22,10 +22,10 @@ struct AddFamilyMemberForm: View {
     ]
     
     let genders = [
-        ("male", "Male"),
-        ("female", "Female"),
-        ("other", "Other"),
-        ("unknown", "Prefer not to say")
+        (Gender.male, "Male"),
+        (Gender.female, "Female"),
+        (Gender.nonBinary, "Non-Binary"),
+        (Gender.other, "Other")
     ]
     
     var body: some View {
@@ -45,7 +45,7 @@ struct AddFamilyMemberForm: View {
                     
                     DatePicker("Date of Birth", selection: $dateOfBirth, displayedComponents: .date)
                     
-                    Picker("Gender", selection: $gender) {
+                    Picker("Gender", selection: $selectedGender) {
                         ForEach(genders, id: \.0) { value, label in
                             Text(label).tag(value)
                         }
@@ -89,14 +89,28 @@ struct AddFamilyMemberForm: View {
     
     private func addMember() {
         Task {
-            await viewModel.addMember(
+            let newMember = User(
+                id: UUID().uuidString,
                 email: email,
                 firstName: firstName,
                 lastName: lastName,
                 dateOfBirth: dateOfBirth,
-                gender: gender,
-                relationship: relationship
+                gender: selectedGender,
+                phoneNumber: nil,
+                country: nil,
+                photoURL: nil,
+                familyTreeID: viewModel.treeId,
+                historyBookID: nil,
+                parentIds: [],
+                childIds: [],
+                spouseId: nil,
+                siblingIds: [],
+                role: .member,
+                canAddMembers: false,
+                canEdit: false
             )
+            
+            try? await viewModel.addMember(newMember, relationship: relationship)
             
             if viewModel.error == nil {
                 dismiss()
