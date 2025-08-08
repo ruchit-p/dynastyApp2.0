@@ -1,96 +1,74 @@
-# Dynasty
+## Dynasty
 
-A next-generation iOS app designed to preserve and share family history across generations. Dynasty combines secure document storage with interactive family trees, creating a private space for families to document their legacy.
+An open-source iOS app to preserve and share family history across generations. Dynasty combines a secure vault for documents and media with an interactive family tree and collaborative history book.
 
-## Core Features
+### Highlights
 
-### Secure Vault 🔒
-- End-to-end encrypted storage for family documents and media
-- Support for documents, photos, videos, and audio files
-- Biometric authentication with Face ID/Touch ID
-- Auto-lock security system
-- Secure file organization and management
-- Private file sharing between family members
+- Biometric auth (Face ID/Touch ID)
+- Secure vault with end-to-end encryption
+- Interactive family tree
+- History book with media
+- SwiftUI-first architecture
 
-### Family Tree 👨‍👩‍👧‍👦
-- Interactive family tree visualization
-- Intuitive member management
-- Relationship mapping and tracking
-- Family history documentation
-- Permission-based access control
-- Member information profiles
-- Tree navigation and exploration
+### Requirements
 
-### History Book 📖
-- Family story documentation
-- Photo albums and collections
-- Important date tracking
-- Family event timeline
-- Memory preservation
-- Collaborative storytelling
+- Xcode 15+
+- iOS 17+
+- Swift 5.9+
 
-## Technology Overview
+### Quick Start
 
-Built with modern iOS technologies:
-- Swift & SwiftUI for native performance
-- Firebase backend infrastructure
-- End-to-end encryption for security
-- Local authentication framework
-- Real-time data synchronization
+1. Clone the repo
+2. Create a Firebase project (iOS app)
+3. Download your `GoogleService-Info.plist`
+4. Place it at `dynasty/Resources/GoogleService-Info.plist` (not committed)
+5. Open `dynasty.xcodeproj` and Run
 
-## Current Development Status
+See `dynasty/Resources/GoogleService-Info.example.plist` for the expected format. The real file is ignored by git.
 
-### Completed Features ✅
-- Apple Sign In integration
-- Email authentication system
-- Biometric security implementation
-- User profile management
-- Basic family tree structure
-- Secure local data storage
-- Session management
-- Auto-lock functionality
-- SQLite database integration
-- Tab-based navigation
-- Comprehensive error handling
+### Features
 
-### In Progress 🚧
-- Firebase Storage integration for vault
-- End-to-end file encryption system
-- File upload/download functionality
-- File access control implementation
-- Secure file management
-- Thumbnail generation system
+- Secure Vault: encrypted storage, thumbnails, progress tracking, recycle bin
+- Family Tree: member management, relationships, visualization
+- History Book: stories, comments, media, timeline
 
-### Coming Soon 🔜
-- Interactive family tree canvas
-- Member management system
-- Tree visualization components
-- Permission system implementation
-- Feed system development
-- Collaborative features
+### Architecture
 
-## Security & Privacy
+- SwiftUI + MVVM
+- Firebase Auth/Firestore/Storage
+- Keychain-based key management
+- Local SQLite cache
 
-Dynasty prioritizes your family's privacy with:
-- End-to-end encryption
-- Local biometric authentication
-- Secure key storage
-- Auto-lock system
-- Session management
-- Access control
-- Data integrity protection
+### Development
 
-## Vision
+- Use `// MARK:` to organize source files
+- Document public APIs with `///`
+- Handle errors explicitly and surface actionable messages
 
-Dynasty aims to be the most secure and intuitive platform for families to:
-- Preserve important documents and memories
-- Document their family history
-- Connect across generations
-- Share stories and experiences
-- Build their family legacy
+### Firebase Storage Rules Example
 
-Our focus is on creating a private, secure space where families can maintain their history while ensuring their data remains protected and accessible only to authorized family members.
+```
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /vault/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+```
 
----
+### Contributing
 
-*Dynasty is currently in active development. New features and improvements are being added regularly.* 
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+### Security
+
+Never commit secrets. The Firebase plist is ignored by default. See [SECURITY.md](SECURITY.md) for reporting vulnerabilities and cleaning history.
+
+### License
+
+MIT © 2025 Ruchit Patel. See [LICENSE](LICENSE).
